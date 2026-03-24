@@ -8,11 +8,10 @@ dependencies = [
     "highspy",
     "jupyter",
     "matplotlib",
-    "nemdata==0.2.0",
-    "nemosis",
+    "nemosis==3.8.1",
     "notebook",
     "numpy<2",
-    "pandas",
+    "pandas==3.0.1",
     "plotly",
     "pypsa",
 ]
