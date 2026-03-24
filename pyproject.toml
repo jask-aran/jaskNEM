@@ -1,0 +1,21 @@
+[project]
+name = "jasknem"
+version = "0.1.0"
+description = "Analytics project on NEM data using PyPSA"
+readme = "readme.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "highspy",
+    "jupyter",
+    "matplotlib",
+    "nemdata==0.2.0",
+    "nemosis",
+    "notebook",
+    "numpy<2",
+    "pandas",
+    "plotly",
+    "pypsa",
+]
+
+[tool.uv]
+package = false
