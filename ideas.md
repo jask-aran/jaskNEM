@@ -8,6 +8,16 @@
 8. NEMDE MILP Solve takes ~30 seconds, would the market be more efficient if this solve took less time?
 9. How does the introduction of batteries change the market constraint that energy cannot be stored, and how will an increasing amount of storage capacity change the market structure?
 
+Victoria’s Midday Power Saver offer impact
+Revenue profile analysis of solar & wind
+What does turning off Loy Yang look like?
+Impact of PEC
+Impact of HumeLink
+Impact of SnowyHydro/ Snowy2.0
+How do we increase the price elasticity of energy consumers (thus incentivising their demand to shift to high demand dispatch periods)?
+Price cap impact
+
+
 Constraints: AEMO does not just intersect supply and demand curves. Australia's grid is far more constrained than most, so AEMO's optimiser, the "NEM Dispatch Engine" (NEMDE) incorporates hundreds of constraints for system strength, transmission line capacity etc. The definition and evaluation of these is in the data.
 
 

@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 import logging
 
 try:
-    from nemosis import dynamic_data_compiler
+    from nemosis import cache_compiler
     from nemosis import data_fetch_methods as nemosis_data_fetch_methods
     from nemosis import defaults as nemosis_defaults
     from nemosis import processing_info_maps as nemosis_processing_info_maps
@@ -33,38 +33,37 @@ except ImportError:
 
 
 # ── Table definitions ────────────────────────────────────────────────────────
-# (NEMOSIS_name, filter_cols, filter_values)
 TABLES = {
     # Core dispatch/pricing
-    'dudetailsummary':     ('DUDETAILSUMMARY', None, None),
-    'dispatchprice':       ('DISPATCHPRICE', ['INTERVENTION'], ([0],)),
-    'dispatchload':        ('DISPATCHLOAD', ['INTERVENTION'], ([0],)),
-    'dispatchregionsum':   ('DISPATCHREGIONSUM', ['INTERVENTION'], ([0],)),
-    'dispatch-scada':      ('DISPATCH_UNIT_SCADA', ['INTERVENTION'], ([0],)),
+    'dudetailsummary':     'DUDETAILSUMMARY',
+    'dispatchprice':       'DISPATCHPRICE',
+    'dispatchload':        'DISPATCHLOAD',
+    'dispatchregionsum':   'DISPATCHREGIONSUM',
+    'dispatch-scada':      'DISPATCH_UNIT_SCADA',
 
     # Trading (30-min)
-    'tradingprice':        ('TRADINGPRICE', ['INTERVENTION'], ([0],)),
-    'tradingregionsum':    ('TRADINGREGIONSUM', ['INTERVENTION'], ([0],)),
-    'tradinginterconnect': ('TRADINGINTERCONNECT', None, None),
+    'tradingprice':        'TRADINGPRICE',
+    'tradingregionsum':    'TRADINGREGIONSUM',
+    'tradinginterconnect': 'TRADINGINTERCONNECT',
 
     # Pre-dispatch forecasts
-    'predispatch-price':   ('PREDISPATCHPRICE', None, None),
-    'predispatch-load':    ('PREDISPATCHLOAD', None, None),
-    'predispatch-region':  ('PREDISPATCH_REGION_SOLUTION', None, None),
+    'predispatch-price':   'PREDISPATCHPRICE',
+    'predispatch-load':    'PREDISPATCHLOAD',
+    'predispatch-region':  'PREDISPATCH_REGION_SOLUTION',
 
     # Bidding
-    'biddayoffer':         ('BIDDAYOFFER_D', None, None),
-    'bidperoffer':         ('BIDPEROFFER_D', None, None),
+    'biddayoffer':         'BIDDAYOFFER_D',
+    'bidperoffer':         'BIDPEROFFER_D',
 
     # Network constraints
-    'gencondata':          ('GENCONDATA', None, None),
-    'dispatchconstraint':  ('DISPATCHCONSTRAINT', ['INTERVENTION'], ([0],)),
+    'gencondata':          'GENCONDATA',
+    'dispatchconstraint':  'DISPATCHCONSTRAINT',
 
     # Renewables
-    'rooftop-pv':          ('ROOFTOP_PV_ACTUAL', None, None),
+    'rooftop-pv':          'ROOFTOP_PV_ACTUAL',
 
     # Unit solutions
-    'dispatch-unit-solution': ('DISPATCH_UNIT_SOLUTION', ['INTERVENTION'], ([0],)),
+    'dispatch-unit-solution': 'DISPATCH_UNIT_SOLUTION',
 }
 
 
@@ -74,7 +73,6 @@ class SpinnerConsole:
     def __init__(self, stream=None):
         self.stream = stream or sys.stdout
         self.lock = threading.Lock()
-        self.current_text = ""
         self.spinner_visible = False
         self.max_width = 0
 
@@ -84,7 +82,6 @@ class SpinnerConsole:
 
     def render(self, text):
         with self.lock:
-            self.current_text = text
             self.max_width = max(self.max_width, len(text))
             padded = text.ljust(self.max_width)
             self._write(f"\r{padded}")
@@ -113,6 +110,9 @@ class NemosisLogHandler(logging.Handler):
 
     def emit(self, record):
         try:
+            message = record.getMessage()
+            if "date range already compiled" in message:
+                return
             self.console.log(self.format(record))
         except Exception:
             self.handleError(record)
@@ -158,10 +158,20 @@ def get_most_recent_complete_month():
     return start, end
 
 
+def normalize_start(value):
+    """Normalize a CLI start date to a full timestamp string."""
+    return f"{value} 00:00:00" if ' ' not in value else value
+
+
+def normalize_end(value):
+    """Normalize a CLI end date to a full timestamp string."""
+    return f"{value} 23:55:00" if ' ' not in value else value
+
+
 def cache_files_for_table(table_name, start_date, end_date, cache_dir, fformat='parquet'):
     """Return existing non-CSV cache files matching the requested table/date range."""
     (
-        start_date,
+        _,
         end_date,
         _,
         _,
@@ -191,8 +201,7 @@ def cache_files_for_table(table_name, start_date, end_date, cache_dir, fformat='
     return matches
 
 
-def download_table(table_name, start_date, end_date, cache_dir,
-                   filter_cols=None, filter_values=None):
+def download_table(table_name, start_date, end_date, cache_dir):
     """Download a single NEMOSIS table. Returns True on success."""
     print(f"\n--- {table_name} ---", flush=True)
     t0 = time.time()
@@ -205,11 +214,9 @@ def download_table(table_name, start_date, end_date, cache_dir,
 
     def run():
         try:
-            result['df'] = dynamic_data_compiler(
+            cache_compiler(
                 start_date, end_date, table_name, cache_dir,
                 fformat='parquet',
-                filter_cols=filter_cols,
-                filter_values=filter_values,
             )
         except Exception as e:
             result['error'] = e
@@ -235,7 +242,6 @@ def download_table(table_name, start_date, end_date, cache_dir,
     after_files = cache_files_for_table(table_name, start_date, end_date, cache_dir)
     files_added = len(after_files - before_files)
     print(f"    {files_added:,} files added, {time.time() - t0:.1f}s")
-    del result['df']
     return True
 
 
@@ -258,8 +264,14 @@ Groups:
         """
     )
 
-    parser.add_argument('--start', help='Start YYYY/MM/DD (default: most recent month)')
-    parser.add_argument('--end', help='End YYYY/MM/DD (default: most recent month)')
+    parser.add_argument(
+        '--start',
+        help='Start YYYY/MM/DD; if used alone, end defaults to the latest complete month',
+    )
+    parser.add_argument(
+        '--end',
+        help='End YYYY/MM/DD; requires --start, otherwise the request is rejected',
+    )
     parser.add_argument('--cache', default='./data/nemosis_cache')
 
     # Groups
@@ -278,14 +290,31 @@ Groups:
 
     # Date range
     if args.start and args.end:
-        start_date = f"{args.start} 00:00:00" if ' ' not in args.start else args.start
-        end_date = f"{args.end} 23:55:00" if ' ' not in args.end else args.end
+        start_date = normalize_start(args.start)
+        end_date = normalize_end(args.end)
         period = f"{args.start} to {args.end}"
+    elif args.start:
+        _, default_end = get_most_recent_complete_month()
+        start_date = normalize_start(args.start)
+        end_date = default_end.strftime('%Y/%m/%d %H:%M:%S')
+        period = f"{start_date} to {end_date}"
+    elif args.end:
+        print("ERROR: --end requires --start")
+        sys.exit(1)
     else:
         s, e = get_most_recent_complete_month()
         start_date = s.strftime('%Y/%m/%d %H:%M:%S')
         end_date = e.strftime('%Y/%m/%d %H:%M:%S')
         period = s.strftime('%Y-%m')
+
+    start_dt = datetime.strptime(start_date, '%Y/%m/%d %H:%M:%S')
+    end_dt = datetime.strptime(end_date, '%Y/%m/%d %H:%M:%S')
+    if start_dt > end_dt:
+        print(
+            "ERROR: Start date must not be after end date. "
+            f"Resolved end date is {end_date}."
+        )
+        sys.exit(1)
 
     # Build table list
     selected = []
@@ -319,8 +348,7 @@ Groups:
     ok_count = 0
     try:
         for key in selected:
-            name, fcols, fvals = TABLES[key]
-            if download_table(name, start_date, end_date, args.cache, fcols, fvals):
+            if download_table(TABLES[key], start_date, end_date, args.cache):
                 ok_count += 1
     except KeyboardInterrupt:
         print("\n\nCancelled.")
