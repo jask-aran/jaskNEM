@@ -15,3 +15,18 @@ Constraints: AEMO does not just intersect supply and demand curves. Australia's 
 ## Info Sources
 1. https://www.mdavis.xyz/mms-guide/
 2. https://adgefficiency.com/blog/hackers-aemo/
+3. wattclarity.com.au
+4. https://wattclarity.com.au/articles/2025/01/opening-the-black-box-a-beginners-guide-to-wholesale-market-modelling-part-1/
+5. currentlyspeaking.substack.com
+6. nemlog.substack.com
+7. benbeattie.substack.com
+
+
+Reading sequence
+Given where you are in the learning plan, the order that will compound fastest:
+
+WattClarity Beginner's Guide → Intermediate Guide → Price Setting Concepts (understand how prices actually get set before building 1.3)
+Endgame Economics three-part series (understand where your PyPSA model fits in the modelling hierarchy)
+Open Electricity Economics chapters 4 and 5 (theoretical grounding for shadow prices and capacity mix)
+Full Matthew Davis MMS guide (fill in data gotchas as you hit them in 1.2)
+nempy docs and examples (when you're ready to model dispatch more precisely than PyPSA allows)
