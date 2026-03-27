@@ -799,6 +799,7 @@ dependencies = [
     { name = "numpy" },
     { name = "pandas" },
     { name = "plotly" },
+    { name = "polars" },
     { name = "pypsa" },
 ]
 
@@ -813,6 +814,7 @@ requires-dist = [
     { name = "numpy", specifier = "<2" },
     { name = "pandas", specifier = "==3.0.1" },
     { name = "plotly" },
+    { name = "polars" },
     { name = "pypsa" },
 ]
 
