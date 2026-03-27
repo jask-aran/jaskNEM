@@ -76,21 +76,31 @@ What you'll see: the characteristic "duck curve" shape in SA, the tight correlat
 
 **Learning outcome**: You learn not just the analytics, but also **how to work with large energy datasets** — sampling strategies, memory management, and when to brute-force vs. when to be smart. This is production-ready data work.
 
-**Notebook 1.3 — Price spike autopsy**
+**Notebook 1.3 — Price spike autopsy** (detailed plan: [Notebook 1.3.md](Notebook 1.3.md))
 
-Pick a known price spike event — South Australian high-price events happen regularly. Pull data for that day at 5-minute resolution and reconstruct what happened:
-- What was demand doing?
-- Which generators went offline or reduced output?
-- Was the SA-VIC interconnector at its import limit?
-- Which unit ultimately set price?
-
-Write up 3 paragraphs explaining the event as if briefing a trader. This is the analytical muscle you're building — the ability to tell a coherent story from dispatch data.
+Reconstruct a real SA high-price event from multiple dispatch tables and write a trader-briefing narrative. Requires downloading `DISPATCHREGIONSUM`, `DISPATCHINTERCONNECTORRES`, and `DISPATCH_UNIT_SCADA` (event month only). Five analysis panels: price context, demand/supply, interconnector congestion, generator response, and price-setter identification. Outputs a 3-paragraph written autopsy explaining what happened, why, and what it means for a portfolio. Builds the multi-table joining and event-narrative skills needed for 1.4 and Stage 3.
 
 **Notebook 1.4 — Interconnector flows**
 
 Pull `DISPATCHREGIONSUM` and focus on interconnector flows (VIC-SA `V-SA`, TAS-VIC `T-V-MNSP1`). Build:
 - Flow duration curves for each interconnector
 - Price differentials between connected regions vs. interconnector utilisation — you'll visually see the relationship between flow limits and price separation
+
+**Notebook 1.5 — Constraint and Dynamic Binding Attribution**
+
+This sits **after** 1.3 and 1.4 on purpose. We originally expected to read interconnector transfer limits straight from `DISPATCHINTERCONNECTORRES`, but the local `nemosis` parquet schema trims that table down to realised flows and losses. That is enough for a case-study narrative in 1.3, but not enough to prove the exact binding mechanism.
+
+So the later notebook should do the next layer properly:
+- download `DISPATCHCONSTRAINT` and `GENCONDATA`
+- identify which constraints had non-zero marginal value during a chosen event window
+- connect those binding constraints to the observed regional price separation and interconnector flow behaviour
+- write a short note on the difference between:
+- observed congestion symptoms in `DISPATCHINTERCONNECTORRES` and `DISPATCHPRICE`
+- exact binding attribution from the constraint tables
+
+Learning outcome:
+- understand how to move from "this looks constrained" to "this specific network constraint bound and changed the dispatch outcome"
+- learn when a simple event notebook is enough and when you need to step into NEMDE constraint logic
 
 ---
 
