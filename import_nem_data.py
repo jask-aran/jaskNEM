@@ -45,6 +45,7 @@ TABLES = {
     'tradingprice':        'TRADINGPRICE',
     'tradingregionsum':    'TRADINGREGIONSUM',
     'tradinginterconnect': 'TRADINGINTERCONNECT',
+    'market-price-thresholds': 'MARKET_PRICE_THRESHOLDS',
 
     # Pre-dispatch forecasts
     'predispatch-price':   'PREDISPATCHPRICE',

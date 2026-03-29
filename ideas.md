@@ -43,15 +43,13 @@ nempy docs and examples (when you're ready to model dispatch more precisely than
 
 
 # Project Plan
-## Stage 1 — NEM Data Fluency (Weeks 1–4)
-
-The goal is not to model anything yet. The goal is to develop an intuitive feel for what NEM data looks like, what "normal" looks like, and to be able to spot when something interesting happened in a price series.
+## Stage 1 — NEM Data Exploration
 
 **Notebook 1.1 — Price explorer**
 
 Pull 12 months of `DISPATCHPRICE` for all five NEM regions (QLD, NSW, VIC, SA, TAS) using NEMOSIS. Build:
 - A time-series plot of 5-minute RRP for each region overlaid
-- A **price duration curve** — sort prices descending, plot against % of intervals. This is one of the most fundamental charts in energy analysis. You want to be able to read one fluently.
+- A **price duration curve** — sort prices descending, plot against % of intervals. 
 - A heatmap of average price by hour-of-day and day-of-week for each region
 
 What you'll see: the characteristic "duck curve" shape in SA, the tight correlation between NSW and QLD, how TAS decouples when the Basslink interconnector is constrained. This is domain knowledge you can't get from reading.
@@ -101,6 +99,37 @@ So the later notebook should do the next layer properly:
 Learning outcome:
 - understand how to move from "this looks constrained" to "this specific network constraint bound and changed the dispatch outcome"
 - learn when a simple event notebook is enough and when you need to step into NEMDE constraint logic
+
+**Notebook 1.6 — Price Cap and Scarcity Episodes**
+
+This should sit between the broad orientation in 1.1 and the deeper event autopsy / constraint work in 1.3 and 1.5. The goal is narrower than a full event reconstruction: identify every interval where market prices actually hit the effective market cap, then group those intervals into a small number of scarcity episodes worth investigating further.
+
+Core idea:
+- use `DISPATCHPRICE` with `INTERVENTION = 0` to keep the cap-hit signal tied to underlying market-set prices
+- use the consolidated effective-dated `MARKET_PRICE_THRESHOLDS` reference file to map the correct `VOLL` to each interval
+- flag intervals where `RRP >= effective VOLL`
+- optionally add rolling cumulative-price logic later to distinguish:
+- isolated cap hits
+- sustained scarcity episodes
+- episodes likely to approach or trigger administered pricing
+
+Outputs:
+- table of cap-hit timestamps by region
+- clustered event windows (for example, consecutive or near-consecutive cap intervals)
+- simple charts showing cap-hit intervals on top of the 5-minute regional price series
+- short written summary of which regions hit cap, when, and whether those hits were isolated spikes or part of a broader event
+
+Possible extensions:
+- add cumulative-price-threshold / administered-pricing context once the project preserves the relevant MMS field
+- use this notebook as the event finder that feeds candidate windows into 1.3 and 1.5
+
+Learning outcome:
+- distinguish ordinary volatility from true scarcity pricing
+- understand the difference between:
+- very high prices
+- market cap hits
+- administered pricing
+- build a reproducible event-discovery workflow before doing deep-dive autopsies
 
 ---
 
