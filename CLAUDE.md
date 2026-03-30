@@ -1,10 +1,6 @@
+@marimo.md
+
 # Repository Guidelines
-
-## Marimo Notebooks
-
-When creating or editing marimo notebooks, read `marimo.md` at the project root for detailed guidelines on cell structure, reactivity, UI elements, and best practices.
-
-
 
 ## Project Structure & Module Organization
 

@@ -2,27 +2,68 @@
 2. How accurate are the MMSDMPS forecasts for the next 5 mins and further?
 3. Are rebidding justifications being taken advantage of?
 4. To what degree is the NEM/ Australia capacity constrained beyond other markets, and what does that mean for having a dispatch engine
-5. A gentailer's retail operations desire low wholesale prices, while its generation arm desires high prices. How do they coordinate bidding across their portfolio, and does that constitutes market manipulation? (Ongoing regulatory question.)
+5. A gentailer’s retail operations desire low wholesale prices, while its generation arm desires high prices. How do they coordinate bidding across their portfolio, and does that constitutes market manipulation? (Ongoing regulatory question.)
 6. To what degree do Energy Asset Operators rely on heuristics or manual dispatch decisions? https://adgefficiency.com/blog/energy-py-linear/
 7. How do we get from modeled competitive market price (lower bound) to realised prices in the dispatched model
 8. NEMDE MILP Solve takes ~30 seconds, would the market be more efficient if this solve took less time?
 9. How does the introduction of batteries change the market constraint that energy cannot be stored, and how will an increasing amount of storage capacity change the market structure?
+10. Victoria’s Midday Power Saver offer impact
+11. Revenue profile analysis of solar & wind
+12. What does turning off Loy Yang look like?
+13. Impact of PEC
+14. Impact of HumeLink
+15. Impact of SnowyHydro/ Snowy2.0
+16. How do we increase the price elasticity of energy consumers (thus incentivising their demand to shift to high demand dispatch periods)?
+17. Price cap impact
+18. Analyse Dispatch interval forecast error
 
-Victoria’s Midday Power Saver offer impact
-Revenue profile analysis of solar & wind
-What does turning off Loy Yang look like?
-Impact of PEC
-Impact of HumeLink
-Impact of SnowyHydro/ Snowy2.0
-How do we increase the price elasticity of energy consumers (thus incentivising their demand to shift to high demand dispatch periods)?
-Price cap impact
+---
 
+## Investigability Assessment
 
-Constraints: AEMO does not just intersect supply and demand curves. Australia's grid is far more constrained than most, so AEMO's optimiser, the "NEM Dispatch Engine" (NEMDE) incorporates hundreds of constraints for system strength, transmission line capacity etc. The definition and evaluation of these is in the data.
+Ideas grouped by what data access they require.
 
-The thing that makes electricity markets very different from any other market is that “…electrical current…must be produced, to the millisecond, at the moment of consumption, giving an exact balance between power supply and demand. Stable power grids are based on this principle” as Ziegler and his co-authors put it.
+### Investigable now — existing explored tables
 
+These use `DISPATCHPRICE`, `DISPATCH_UNIT_SCADA`, `DISPATCHREGIONSUM`, `DISPATCHINTERCONNECTORRES`, and the registration workbook.
 
+| # | Idea | Notes |
+|---|------|-------|
+| 2, 18 | Forecast accuracy / dispatch interval error | `P5MIN_REGIONSOLUTION` + `PREDISPATCHPRICE` vs `DISPATCHPRICE`. These two are the same question from different angles. |
+| 11 | Solar & wind revenue profile | Capture price discount vs average RRP — directly computable from `DISPATCH_UNIT_SCADA` + `DISPATCHPRICE` + registration workbook. |
+| 17 | Price cap impact | `DISPATCHPRICE` + `MARKET_PRICE_THRESHOLDS`. Already fully planned in Notebook 1.6. |
+| 12 | Loy Yang shutdown | Filter existing tables by Loy Yang DUIDs, examine output history and regional price response. Near-ready; `DISPATCHLOAD.AVAILABILITY` sharpens it. |
+| 10 | Midday Power Saver impact | Event-window analysis on `DISPATCHPRICE` + `DISPATCHREGIONSUM` — look for demand response in `TOTALDEMAND` during offer periods. |
+
+### Investigable with one additional table
+
+| # | Idea | What’s needed |
+|---|------|---------------|
+| 7 | Competitive vs realised price | Partial without bids. Full answer requires `BIDDAYOFFER` / `BIDPEROFFER` to compare actual offer prices against SRMC proxies. |
+| 14, 15 | HumeLink / Snowy2.0 impact | Before/after on existing tables is easy. Attributing the exact binding mechanism requires `DISPATCHCONSTRAINT` + `GENCONDATA` (Notebook 1.5 tables). |
+| 13 | Impact of PEC | Depends on definition. If administered pricing: extension of 1.6 via cumulative-price-threshold logic. If a generator: DUID-level filter on existing tables. |
+
+### Requires new datasets or significant data acquisition
+
+| # | Idea | Blocker |
+|---|------|---------|
+| 3 | Rebidding justifications | `BIDDAYOFFER` + `BIDOFFERPERIOD` with rebid reason text. Large tables, non-trivial deduplication. Substantial new acquisition before any analysis. |
+| 5 | Gentailer portfolio / manipulation | Same bid table dependency as #3, plus participant attribution across retail and generation arms. Research-grade question. |
+| 4 | NEM capacity constraint vs other markets | NEM side is tractable (`DISPATCHCONSTRAINT` binding frequency). Cross-market comparison (CAISO, ERCOT, GB) requires entirely external data. |
+| 6 | Operator heuristics vs manual dispatch | Operational/interview data or internal logs. Not in any AEMO public dataset. |
+| 8 | NEMDE solve time and market efficiency | Requires NEMDE solve-time logs (not public) and a custom MILP to test alternatives. |
+| 16 | Demand price elasticity | Policy/market design question. Data can show current demand response; "how to increase it" is beyond analysis. |
+
+### PyPSA simulation questions (Stage 2+)
+
+These are counterfactual "what if X changes" questions — the right tool is the simulation layer, not data exploration.
+
+| # | Idea | Stage |
+|---|------|-------|
+| 1 | WA connected to NEM | Multi-bus PyPSA model + WEM data (separate system). Good capstone. |
+| 9 | Storage changing market structure | Directly addressed by Notebook 2.3. Data precursor is the revenue/capture-price analysis from #11. |
+
+---
 
 ## Info Sources
 1. https://www.mdavis.xyz/mms-guide/
@@ -34,73 +75,21 @@ The thing that makes electricity markets very different from any other market is
 7. benbeattie.substack.com
 8. itkservices3.com/posts.html
 
-Reading sequence
-Given where you are in the learning plan, the order that will compound fastest:
+## Reading Sequence
 
-WattClarity Beginner's Guide → Intermediate Guide → Price Setting Concepts (understand how prices actually get set before building 1.3)
-Endgame Economics three-part series (understand where your PyPSA model fits in the modelling hierarchy)
-Open Electricity Economics chapters 4 and 5 (theoretical grounding for shadow prices and capacity mix)
-Full Matthew Davis MMS guide (fill in data gotchas as you hit them in 1.2)
-nempy docs and examples (when you're ready to model dispatch more precisely than PyPSA allows)
+WattClarity Beginner's Guide → Intermediate Guide → Price Setting Concepts
+Endgame Economics three-part series (where PyPSA fits in the modelling hierarchy)
+Open Electricity Economics chapters 4 and 5 (shadow prices and capacity mix)
+Full Matthew Davis MMS guide (data gotchas as you hit them)
+nempy docs and examples (when ready to model dispatch more precisely than PyPSA)
 
+---
 
 # Project Plan
+
 ## Stage 1 — NEM Data Exploration
 
-**Notebook 1.1 — Price explorer**
-
-Pull 12 months of `DISPATCHPRICE` for all five NEM regions (QLD, NSW, VIC, SA, TAS) using NEMOSIS. Build:
-- A time-series plot of 5-minute RRP for each region overlaid
-- A **price duration curve** — sort prices descending, plot against % of intervals. 
-- A heatmap of average price by hour-of-day and day-of-week for each region
-
-What you'll see: the characteristic "duck curve" shape in SA, the tight correlation between NSW and QLD, how TAS decouples when the Basslink interconnector is constrained. This is domain knowledge you can't get from reading.
-
-**Notebook 1.2 — Generator dispatch explorer**
-
-**Data challenge**: `DISPATCHLOAD` is 90-120x larger than `DISPATCHPRICE` (~50M rows vs. 500K rows for a full year). Loading everything into memory exhausts typical laptop RAM, especially in WSL.
-
-**Memory-efficient strategy**:
-1. **Use Polars** for lazy evaluation and efficient memory usage
-2. **Read parquet files directly** from NEMOSIS cache (bypass `dynamic_data_compiler`)
-3. **Strategic sampling**:
-   - **One week** for merit order stacks and marginal generator analysis (~1M rows)
-   - **12 weeks** (one per month) for capacity factor and regional mix (~12M rows)
-   - **Result**: 75% fewer rows, 80% less memory than brute-force full-year load
-
-**Analyses**:
-- **Merit order stack** — for a representative week, plot generator dispatch by fuel type across 24 hours. Coal at the bottom, gas in the middle, peakers at the top. Compare VIC (coal-heavy) vs. SA (wind/gas).
-- **Marginal generator identification** — use SRMC proxy to identify which fuel type was price-setting in each interval. VIC: gas peakers during peaks, coal during off-peak. SA: gas dominates (no coal baseload).
-- **Capacity factor analysis** — from 12 weekly samples (one per month), calculate annual CF estimates. Coal: 70-90%, Wind: 30-35%, Solar: 20-25%, Gas peakers: <5%. Identify low-CF coal units (potential outages).
-- **Regional generation mix** — VIC: coal-dominated, SA: wind-dominated, TAS: hydro-dominated. This is the structural difference that drives price dynamics.
-
-**Learning outcome**: You learn not just the analytics, but also **how to work with large energy datasets** — sampling strategies, memory management, and when to brute-force vs. when to be smart. This is production-ready data work.
-
-**Notebook 1.3 — Price spike autopsy** (detailed plan: [Notebook 1.3.md](Notebook 1.3.md))
-
-Reconstruct a real SA high-price event from multiple dispatch tables and write a trader-briefing narrative. Requires downloading `DISPATCHREGIONSUM`, `DISPATCHINTERCONNECTORRES`, and `DISPATCH_UNIT_SCADA` (event month only). Five analysis panels: price context, demand/supply, interconnector congestion, generator response, and price-setter identification. Outputs a 3-paragraph written autopsy explaining what happened, why, and what it means for a portfolio. Builds the multi-table joining and event-narrative skills needed for 1.4 and Stage 3.
-
-**Notebook 1.4 — Interconnector flows**
-
-Pull `DISPATCHREGIONSUM` and focus on interconnector flows (VIC-SA `V-SA`, TAS-VIC `T-V-MNSP1`). Build:
-- Flow duration curves for each interconnector
-- Price differentials between connected regions vs. interconnector utilisation — you'll visually see the relationship between flow limits and price separation
-
-**Notebook 1.5 — Constraint and Dynamic Binding Attribution**
-
-This sits **after** 1.3 and 1.4 on purpose. We originally expected to read interconnector transfer limits straight from `DISPATCHINTERCONNECTORRES`, but the local `nemosis` parquet schema trims that table down to realised flows and losses. That is enough for a case-study narrative in 1.3, but not enough to prove the exact binding mechanism.
-
-So the later notebook should do the next layer properly:
-- download `DISPATCHCONSTRAINT` and `GENCONDATA`
-- identify which constraints had non-zero marginal value during a chosen event window
-- connect those binding constraints to the observed regional price separation and interconnector flow behaviour
-- write a short note on the difference between:
-- observed congestion symptoms in `DISPATCHINTERCONNECTORRES` and `DISPATCHPRICE`
-- exact binding attribution from the constraint tables
-
-Learning outcome:
-- understand how to move from "this looks constrained" to "this specific network constraint bound and changed the dispatch outcome"
-- learn when a simple event notebook is enough and when you need to step into NEMDE constraint logic
+Notebooks 1.1–1.5 are complete or in progress. Plans are in the individual notebook files.
 
 **Notebook 1.6 — Price Cap and Scarcity Episodes**
 
@@ -135,7 +124,7 @@ Learning outcome:
 
 ---
 
-## Stage 2 — First PyPSA Models (Weeks 5–10)
+## Stage 2 — PyPSA Models
 
 **The PyPSA mental model before you start:**
 
@@ -143,77 +132,134 @@ A `Network` object is the container for all components. `Buses` are the fundamen
 
 The shadow price of the power balance constraint at each bus IS the electricity price. This is the key conceptual link — understanding that the spot price is just a Lagrange multiplier is what separates someone who understands market pricing from someone who just reads numbers.
 
-**Notebook 2.1 — Toy single-bus dispatch (Day 1 of PyPSA)**
+**Notebook 2.1 — Toy model complexity ladder**
 
-Build the simplest possible model: one bus, four generators, one load, 24-hour horizon.
+A single notebook that builds the model incrementally. Each section adds one dimension of complexity, producing a visible change in the price output. The model starts with stylised inputs throughout — real data comes in 2.2.
+
+*Step 1 — Single bus, flat demand, 24h*
+
+One bus, four generators, flat demand profile. The first "model produces prices" moment. Dispatch stack chart + shadow price series.
 
 ```python
-import pypsa, pandas as pd
+import pypsa, pandas as pd, numpy as np
 
 n = pypsa.Network()
 n.set_snapshots(pd.date_range("2024-01-01", periods=24, freq="h"))
 n.add("Bus", "NEM")
 
-# Generator fleet (stylised NEM)
 n.add("Generator", "Brown Coal", bus="NEM", p_nom=3000, marginal_cost=25)
 n.add("Generator", "Black Coal", bus="NEM", p_nom=5000, marginal_cost=40)
 n.add("Generator", "CCGT Gas",   bus="NEM", p_nom=2000, marginal_cost=85)
 n.add("Generator", "OCGT Gas",   bus="NEM", p_nom=800,  marginal_cost=180)
-n.add("Generator", "Wind",       bus="NEM", p_nom=2000, marginal_cost=0,
-      p_max_pu=wind_profile)  # time-varying capacity factor
 
-n.add("Load", "Demand", bus="NEM", p_set=demand_profile)
+n.add("Load", "Demand", bus="NEM", p_set=8000)  # flat 8 GW
 n.optimize(solver_name="highs")
 ```
 
-Outputs to build:
-- Dispatch stack chart by hour — stacked area showing each technology's contribution
-- The model's shadow price series (this is your "simulated spot price")
-- Total system cost
+*Step 2 — Realistic demand profile*
 
-This is your first "model produces prices" moment. It's simple but the structure is identical to what PLEXOS does at industrial scale.
-
-**Notebook 2.2 — Add transmission: two-region model**
-
-Add a second bus and a line. This is where it gets interesting.
+Replace flat demand with a morning/evening peak shape. Price now varies with load — gas peakers start appearing at peaks.
 
 ```python
-n.add("Bus", "VIC")
-n.add("Bus", "SA")
-n.add("Line", "VIC-SA interconnector", 
-      bus0="VIC", bus1="SA", 
-      s_nom=650,   # MW transfer limit
-      x=0.1)
+hours = np.arange(24)
+demand = 6000 + 2000 * (np.exp(-((hours - 8) ** 2) / 8) + np.exp(-((hours - 18) ** 2) / 8))
+n.loads.loc["Demand", "p_set"] = demand  # replace flat with shaped profile
+n.optimize(solver_name="highs")
 ```
 
-Now run the same dispatch optimisation. When SA has cheap wind, it exports to VIC. When SA wind is low and VIC generation is tight, SA imports and prices diverge. The model will produce **different shadow prices at each bus** when the line is congested — this is locational marginal pricing in its purest form.
+*Step 3 — Add solar with diurnal profile*
 
-Exercise: reduce `s_nom` to 200MW and observe how SA prices spike relative to VIC. You've just modelled interconnector congestion.
+Solar capacity factor follows a bell curve peaking at midday. Price drops midday, spikes in the evening ramp. The duck curve emerges.
 
-**Notebook 2.3 — Add storage**
+```python
+solar_cf = np.clip(np.exp(-((hours - 12) ** 2) / 8), 0, 1)
+n.add("Generator", "Solar", bus="NEM", p_nom=1500, marginal_cost=0, p_max_pu=solar_cf)
+n.optimize(solver_name="highs")
+```
+
+*Step 4 — Add storage*
+
+Add a battery (stylised Hornsdale, 150MW/1hr). The optimiser charges during the solar surplus and dispatches into the evening peak. Plot SoC alongside price — this is the core of every battery revenue model in the NEM.
 
 ```python
 n.add("StorageUnit", "Hornsdale Battery",
-      bus="SA",
-      p_nom=150,        # MW charge/discharge
-      max_hours=1,      # MWh/MW = 1hr duration
+      bus="NEM",
+      p_nom=150,
+      max_hours=1,
       efficiency_store=0.92,
       efficiency_dispatch=0.92,
       marginal_cost=0)
+n.optimize(solver_name="highs")
+# n.storage_units_t.state_of_charge to plot SoC
 ```
 
-Now the optimiser decides when to charge (when prices are low) and discharge (when prices are high). Plot the battery's state of charge alongside the SA price. You'll see it charging during wind surplus and dispatching into evening peaks. This is the core of every battery revenue model in the NEM.
+*Step 5 — Extend to one week*
 
-**Notebook 2.4 — Feed in real AEMO data**
+Extend snapshots from 24h to 168h. Observe SoC threading across days — the battery now has to make multi-day charge/discharge decisions. This is the key distinction from a single-day model.
 
-This is the bridge between toy models and real analysis. Use your Stage 1 data pipelines to:
-1. Pull actual AEMO demand profiles for VIC and SA for a specific week
-2. Build wind capacity factor time-series from `DISPATCH_UNIT_SCADA` for major SA wind farms
-3. Use the AEMO Registration list to parameterise real generators (capacity, fuel type → marginal cost approximation)
-4. Run your two-region model on real inputs for that week
-5. Compare your model's shadow prices to actual AEMO spot prices for the same period
+```python
+n.set_snapshots(pd.date_range("2024-01-01", periods=168, freq="h"))
+# tile demand and solar profiles across 7 days
+n.loads_t.p_set["Demand"] = np.tile(demand, 7)
+n.generators_t.p_max_pu["Solar"] = np.tile(solar_cf, 7)
+n.optimize(solver_name="highs")
+```
 
-The gap between your model and reality is your calibration exercise. SA prices spike to thousands of $/MWh in real data; your model probably won't do that unless you add peakers and model scarcity correctly. Understanding *why* they diverge is the learning.
+*Step 6 — Two-region model (VIC–SA)*
+
+Add a second bus and a line. When SA wind is abundant it exports to VIC; when the interconnector is congested, shadow prices diverge at each bus. Reduce `s_nom` to observe price separation. This is locational marginal pricing in its purest form.
+
+```python
+n.add("Bus", "SA")
+n.add("Line", "VIC-SA", bus0="NEM", bus1="SA", s_nom=650, x=0.1)
+
+wind_cf = np.random.uniform(0.1, 0.8, 168)  # stylised intermittent wind
+n.add("Generator", "SA Wind", bus="SA", p_nom=2000, marginal_cost=0, p_max_pu=wind_cf)
+n.add("Generator", "SA Gas",  bus="SA", p_nom=800,  marginal_cost=120)
+n.add("Load", "SA Demand",    bus="SA", p_set=np.tile(demand * 0.4, 1))  # SA ~40% of VIC
+
+n.optimize(solver_name="highs")
+# n.buses_t.marginal_price to compare shadow prices at each bus
+```
+
+*Step 7 — Three-region model (VIC–SA–NSW)*
+
+Add NSW. Prices now interact across three nodes — a constraint on one line shifts dispatch and prices everywhere else. Observe how NSW acts as a sink for both VIC and SA exports.
+
+```python
+n.add("Bus", "NSW")
+n.add("Line", "VIC-NSW", bus0="NEM", bus1="NSW", s_nom=1400, x=0.1)
+
+n.add("Generator", "NSW Black Coal", bus="NSW", p_nom=6000, marginal_cost=42)
+n.add("Generator", "NSW OCGT",       bus="NSW", p_nom=1000, marginal_cost=190)
+n.add("Load", "NSW Demand", bus="NSW", p_set=np.tile(demand * 1.3, 1))  # NSW largest region
+
+n.optimize(solver_name="highs")
+```
+
+*Step 8 — Scarcity pricing / VOLL*
+
+Add a VOLL-priced scarcity generator to represent the market price cap. The model can now produce spike events when physical supply is exhausted. Compare price duration curves with and without it.
+
+```python
+VOLL = 15_500  # $/MWh — current NEM market price cap
+n.add("Generator", "Scarcity", bus="NEM", p_nom=99999, marginal_cost=VOLL)
+# With supply tightened (reduce coal p_nom to force scarcity):
+n.generators.loc["Brown Coal", "p_nom"] = 1000
+n.optimize(solver_name="highs")
+# plot price duration curve: n.buses_t.marginal_price.sort_values(..., ascending=False)
+```
+
+**Notebook 2.2 — Real AEMO data**
+
+The bridge from toy models to real analysis. Use a simplified two-region model (VIC–SA) fed with real inputs for a specific week:
+
+1. Pull actual demand profiles from `DISPATCHREGIONSUM`
+2. Build SA wind capacity factor time-series from `DISPATCH_UNIT_SCADA`
+3. Parameterise generators from the AEMO registration workbook (capacity, fuel type → marginal cost proxy)
+4. Run the model and compare shadow prices to actual AEMO spot prices for the same period
+
+The gap between model and reality is the calibration exercise. SA prices spike to thousands of $/MWh in real data; the toy model won't replicate that without scarcity pricing and network constraints. Understanding *why* they diverge is the learning.
 
 ---
 

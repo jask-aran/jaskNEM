@@ -1,11 +1,11 @@
-# NEM Data Guidance For This Project
+# NEM Data Guidance
 
-This document is a compact working reference for the project plan in [ideas.md](/home/jask/jaskNEM/ideas.md). It is built from:
+This document is a compact working reference for finding and interpreting AEMO NEM data. It is built from:
 
 - Matthew Davis, "So you want to query Australian electricity data?": <https://www.mdavis.xyz/mms-guide/>
 - Adam Green, "A Hackers Guide to AEMO & NEM Data": <https://adgefficiency.com/blog/hackers-aemo/>
-- your local cache in `data/nemosis_cache`
-- the current AEMO registration workbook in `data/nemosis_cache/NEM Registration and Exemption List.xlsx`
+- practical experience working with `nemosis`-cached MMS tables
+- the current AEMO registration workbook, especially `PU and Scheduled Loads`
 
 The goal is simple: when a column is not in the table you expected, this should tell you where it probably is, how useful that table is, and what kind of analysis it feeds.
 
@@ -18,39 +18,6 @@ The goal is simple: when a column is not in the table you expected, this should 
 - Forecast data often has two time axes: when the forecast was made, and which interval it applies to.
 - Table names vary slightly across sources. Treat NEMOSIS table names as the canonical names in code.
 - Start with the narrowest table that answers the question. `DISPATCHLOAD` is powerful, but often heavier than necessary.
-
-python3 -c "
-from nemosis import cache_compiler
-cache_compiler('2025/01/01 00:00:00', '2026/02/28 23:55:00',
-               'DISPATCHINTERCONNECTORRES', './data/nemosis_cache', fformat='parquet')
-"
-
-## Current Local Cache
-
-Current cache folder: `data/nemosis_cache`
-
-Present now:
-
-- `DISPATCHPRICE`: 15 monthly parquet files, 655,200 rows total, about 8.8 MB.
-- `DISPATCHLOAD`: 15 monthly parquet files, 67,773,072 rows total, about 689.8 MB.
-- `DUDETAIL`: 136 monthly parquet files, 522,098 rows total, about 6.2 MB.
-- `DUDETAILSUMMARY`: 3 monthly parquet files, 67,052 rows total, about 0.5 MB.
-- `NEM Registration and Exemption List.xlsx`
-
-High-value next downloads:
-
-- `DISPATCHREGIONSUM`
-- `DISPATCH_UNIT_SCADA`
-- `DISPATCHINTERCONNECTORRES`
-- `DISPATCHCONSTRAINT`
-- `GENCONDATA`
-- `P5MIN_REGIONSOLUTION`
-- `PREDISPATCHPRICE`
-
-Useful non-MMS additions:
-
-- NEMDE `NemPriceSetter` XML for direct price-setting attribution
-- the generator carbon-intensity file (`GENUNITS` / CDEII-style joins, depending source)
 
 ## Source Families
 
@@ -66,6 +33,14 @@ Practical consequence:
 - newer rolling files often look like `PUBLIC_ARCHIVE#...`
 - the same logical dataset may have slightly different file/report naming across these layers
 
+## NEMOSIS / Source-System Idiosyncrasies
+
+- `nemosis` is a convenience layer, not a lossless mirror of the full AEMO MMS schema.
+- Some MMS tables are intentionally column-trimmed by `nemosis` before they ever reach parquet.
+- Standing or effective-dated tables should not be expected to behave like interval time-series tables.
+- The same logical dataset can look different across `CURRENT`, `ARCHIVE`, `MMSDM`, and `nemosis` outputs.
+- Before designing an analysis around a field, confirm that the column survived in your actual cached output rather than assuming the full MMS documentation schema is present.
+
 ## Table Map
 
 ### Primary Operational Tables
@@ -78,19 +53,20 @@ These are the tables you will use most often.
 | `DISPATCH_UNIT_SCADA` | DUID x 5 min | `SCADAVALUE` | actual unit output, generation mix, capture price, revenue, CF work | medium |
 | `DISPATCHLOAD` | DUID x 5 min | `INITIALMW`, `TOTALCLEARED`, `AVAILABILITY`, FCAS enabled MW, ramp rates | target vs actual, FCAS, availability, dispatch behaviour | very large |
 | `DISPATCHREGIONSUM` | region x 5 min | `TOTALDEMAND`, `NETINTERCHANGE`, `CLEAREDSUPPLY`, `UIGF` | regional demand story, supply-demand context, net imports/exports | small-medium |
-| `DISPATCHINTERCONNECTORRES` | interconnector x 5 min | `MWFLOW`, `METEREDMWFLOW`, `MWLOSSES` in the current local `nemosis` parquet output | realised interconnector flows, losses, coarse congestion diagnosis | medium |
+| `DISPATCHINTERCONNECTORRES` | interconnector x 5 min | `MWFLOW`, `METEREDMWFLOW`, `MWLOSSES` in common `nemosis` parquet outputs | realised interconnector flows, losses, coarse congestion diagnosis | medium |
 | `P5MIN_REGIONSOLUTION` | region x forecast run x target interval | short-horizon forecast price and dispatch variables | next-hour forecast analysis, short-term prediction quality | large |
 | `PREDISPATCHPRICE` | region x forecast run x target interval | longer-horizon forecast `RRP` | forecast drift, day-ahead-like planning views | very large |
 
 Important caveat:
 
 - Official AEMO MMS documentation for `DISPATCHINTERCONNECTORRES` includes calculated limit fields such as `EXPORTLIMIT`, `IMPORTLIMIT`, `EXPORTCONSTRAINTID`, and `IMPORTCONSTRAINTID`.
-- We expected those fields to be available locally, but the current `nemosis` package in this repo does **not** retain them. Its built-in `table_columns` map trims `DISPATCHINTERCONNECTORRES` to `SETTLEMENTDATE`, `INTERCONNECTORID`, `DISPATCHINTERVAL`, `INTERVENTION`, `MWFLOW`, `METEREDMWFLOW`, and `MWLOSSES` before writing parquet.
+- Common `nemosis` outputs do **not** retain those fields. Its built-in `table_columns` map trims `DISPATCHINTERCONNECTORRES` to `SETTLEMENTDATE`, `INTERCONNECTORID`, `DISPATCHINTERVAL`, `INTERVENTION`, `MWFLOW`, `METEREDMWFLOW`, and `MWLOSSES` before writing parquet.
 - This is a `nemosis` design choice, not an AEMO data limitation. `nemosis` curates many MMS tables down to a smaller, easier-to-use subset of columns. The tradeoff is simpler downstream analysis and smaller files, but occasionally a later-stage analytical field you expected from the raw MMS schema is gone.
-- Practical consequence: if you use the local cached parquet files produced by `nemosis`, you can plot realised flow and price separation, but you cannot read the explicit transfer limits from the parquet cache.
-- For this project, the chosen interpretation is:
+- Practical consequence: if you use `nemosis`-produced parquet files, you can plot realised flow and price separation, but you cannot read explicit transfer limits from that parquet cache.
+- Practical interpretation:
 - use `DISPATCHINTERCONNECTORRES` for realised flow behaviour
-- use `DISPATCHCONSTRAINT` + `GENCONDATA` when you need exact binding attribution in a specific event window
+- use `DISPATCHCONSTRAINT` for interval-level binding evidence
+- add `GENCONDATA` when you need equation context or human-readable interpretation
 - only go hunting for raw `EXPORTLIMIT` / `IMPORTLIMIT` columns if you explicitly want a direct flow-versus-limit overlay
 
 ### Core Reference Tables
@@ -101,7 +77,7 @@ These mostly explain who a unit is.
 |---|---|---|---|
 | `DUDETAILSUMMARY` | `REGIONID`, `PARTICIPANTID`, `STATIONID`, `SCHEDULE_TYPE`, TLF, DLF | first-pass DUID metadata join | easiest way to attach region and participant |
 | `DUDETAIL` | `REGISTEREDCAPACITY`, `MAXCAPACITY`, `DISPATCHTYPE`, `CONNECTIONPOINTID`, `STARTTYPE` | historical unit metadata | time-varying, so use effective dating if history matters |
-| Registration workbook `PU and Scheduled Loads` | fuel, technology, station labels, region, capacities, bidirectional/storage details | fuel-type and technology analysis | best practical source for fuel/tech labels |
+| Registration workbook `PU and Scheduled Loads` | fuel, technology, station labels, region, capacities, bidirectional/storage details | fuel-type and technology analysis | best practical source for fuel/tech labels, but not perfectly historical |
 | Registration workbook `Ancillary Services` | FCAS registration details by DUID | FCAS capability context | useful complement to `DISPATCHLOAD` |
 
 ### Specialist / Event Analysis Tables
@@ -130,13 +106,13 @@ Use these when the question is more specific.
 | regional demand | `DISPATCHREGIONSUM.TOTALDEMAND` |
 | regional net imports / exports | `DISPATCHREGIONSUM.NETINTERCHANGE` |
 | interconnector flow | `DISPATCHINTERCONNECTORRES.MWFLOW` |
-| interconnector transfer limit in the current local parquet cache | not available directly |
-| interconnector transfer limit in the underlying AEMO MMS model | `DISPATCHINTERCONNECTORRES.EXPORTLIMIT` and `DISPATCHINTERCONNECTORRES.IMPORTLIMIT`, but only if you preserve the raw columns instead of using the current trimmed `nemosis` output |
+| interconnector transfer limit in common `nemosis` parquet output | not available directly |
+| interconnector transfer limit in the underlying AEMO MMS model | `DISPATCHINTERCONNECTORRES.EXPORTLIMIT` and `DISPATCHINTERCONNECTORRES.IMPORTLIMIT`, but only if you preserve the raw columns instead of using trimmed `nemosis` output |
 | DUID to region / participant / station | `DUDETAILSUMMARY` |
 | DUID to fuel / technology | registration workbook `PU and Scheduled Loads` |
 | registered / max capacity | `DUDETAIL` first, workbook second |
 | TLF / DLF | `DUDETAILSUMMARY` |
-| constraint that bound | `DISPATCHCONSTRAINT` plus `GENCONDATA` |
+| constraint that bound | `DISPATCHCONSTRAINT` first, then `GENCONDATA` if you need equation context |
 | direct price-setting unit / band | NEMDE `NemPriceSetter` XML |
 | short-horizon price forecasts | `P5MIN_REGIONSOLUTION` |
 | longer-horizon price forecasts | `PREDISPATCHPRICE` |
@@ -170,6 +146,7 @@ Use first:
 - `DISPATCH_UNIT_SCADA`
 - `DUDETAILSUMMARY`
 - registration workbook
+- `DUDETAIL` when capacity fields must be historically correct
 
 Use `DISPATCHLOAD` instead when you need:
 
@@ -186,6 +163,13 @@ Typical outputs:
 - revenue approximations
 - marginal fuel-type heuristics
 
+Metadata guidance:
+
+- Use the registration workbook as the practical source of truth for fuel and technology labels.
+- Use `DUDETAILSUMMARY` as the broad-coverage DUID metadata join for region, participant, and station context.
+- Use `DUDETAIL` when you need effective-dated capacity fields rather than a current administrative snapshot.
+- If an operational DUID exists in dispatch tables but is absent from the registration workbook, keep it in the dataset and classify fuel as unknown rather than silently dropping it.
+
 ### Event / Spike Autopsy
 
 Use first:
@@ -195,14 +179,16 @@ Use first:
 - `DISPATCHINTERCONNECTORRES`
 - `DISPATCH_UNIT_SCADA` or `DISPATCHLOAD`
 - `DISPATCHCONSTRAINT`
-- `GENCONDATA`
+- optionally `GENCONDATA`
 - optionally NEMDE `NemPriceSetter` XML
 
-Recommended sequencing for this project:
+Recommended sequencing:
 
 - First pass: use `DISPATCHINTERCONNECTORRES` plus regional price spreads to show that regions decoupled and flows were operationally tight.
-- Second pass: use `DISPATCHCONSTRAINT` + `GENCONDATA` to identify the exact binding network condition behind that separation.
-- This split exists because the local `nemosis` parquet cache keeps the simple flow fields but drops the raw interconnector limit columns from `DISPATCHINTERCONNECTORRES`.
+- Use `DISPATCHREGIONSUM.NETINTERCHANGE` only as regional context. It is not a substitute for interconnector-specific flow.
+- Second pass: use `DISPATCHCONSTRAINT` to identify which constraints were active and carrying marginal value in the event window.
+- Third pass: add `GENCONDATA` if you need human-readable equation context or more interpretable constraint identity.
+- Use NEMDE `NemPriceSetter` XML only when you need exact price-setting attribution. A view of which units were running is operational context, not proof of which unit or bid band set price.
 
 Typical questions:
 
@@ -270,7 +256,16 @@ lf = lf.with_columns(
 
 - Fuel and technology labels are often easiest to get from the workbook, not MMS reference tables.
 - It is not perfectly versioned historically.
+- `DUDETAILSUMMARY` is often the easiest broad-coverage join for region and DUID identity.
 - For historical capacity correctness, fall back to `DUDETAIL`.
+- If a DUID is operationally present but absent from the workbook, keep it and mark its fuel / technology as unknown rather than dropping it.
+
+### Effective-Dated Tables Behave Differently
+
+- Not every useful table is a simple interval time series.
+- Standing or effective-dated tables should be interpreted by validity period, not by assuming one row per dispatch interval.
+- In `nemosis`, tables such as `MARKET_PRICE_THRESHOLDS` may need a historical snapshot walk rather than a narrow interval-style query.
+- For market-cap logic, use the effective-dated values that apply at the interval being analysed rather than hardcoding one threshold for the whole sample.
 
 ### Rooftop Solar Matters
 
@@ -284,57 +279,20 @@ lf = lf.with_columns(
 - Deduplication is non-trivial.
 - For many current project tasks, you do not need them yet.
 
-## Recommended Workflow
+## Practical Access Pattern
 
-1. Start from the question.
-2. Choose the narrowest operational table that directly answers it.
-3. Attach unit metadata with `DUDETAILSUMMARY`.
-4. Attach fuel / technology from the registration workbook only if needed.
-5. Only then move into constraints, forecasts, bids, or price-setter XML.
+This is a compact workflow for reusable NEM analysis:
 
-In practice:
-
-- price question -> `DISPATCHPRICE`
-- generator output question -> `DISPATCH_UNIT_SCADA`
-- dispatch target / FCAS / availability question -> `DISPATCHLOAD`
-- demand / import-export question -> `DISPATCHREGIONSUM`
-- interconnector question -> `DISPATCHINTERCONNECTORRES`
-- spike-explanation question -> add constraints and possibly price-setter XML
-
-## What The Notebook Workflow Teaches
-
-`Generator_Dispatch_Explorerv2.ipynb` is a good example of a practical generator-analysis workflow built around cached `DISPATCHLOAD` parquet files plus the registration workbook. The main lessons are:
-
-- scan cached parquet directly with Polars rather than repeatedly calling NEMOSIS loaders once files already exist
-- expect NEMOSIS parquet columns to arrive as strings and cast timestamps / MW / flags explicitly before analysis
-- filter `INTERVENTION == 0` early so every later aggregation stays on normal dispatch intervals
-- convert `SETTLEMENTDATE` from interval end to interval start immediately if you want intuitive hourly grouping and charts
-- use the registration workbook as the main source for `DUID -> fuel type / region / station / registered capacity`
-- normalise workbook schema differences across `.xls` and `.xlsx` versions before joining
-- create a project-level simplified fuel map because raw workbook fuel labels are too granular and inconsistent for charts
-- drop or explicitly inspect unmapped `DUID`s after the metadata join instead of silently carrying them forward
-- for broad annual patterns, use one representative week per month as a memory-efficient sample instead of loading a full year of `DISPATCHLOAD`
-
-In practice, the notebook is doing three separate things:
-
-- a one-week slice for high-resolution intra-day structure such as regional merit-order-style fuel stacks
-- a 12-week sampled year for approximate annual capacity-factor and generation-mix analysis
-- a registration-enriched unit table that turns raw `DUID` dispatch into fuel, capacity, and region views
-
-## Notebook-Derived Pattern
-
-This is the concrete workflow implied by the notebook and is worth reusing for similar work:
-
-1. Discover cached `*DISPATCHLOAD*.parquet` files in `data/nemosis_cache`.
-2. Load only the month or weeks needed with `pl.scan_parquet(...)`.
-3. Parse `SETTLEMENTDATE`, cast `INITIALMW`, cast `INTERVENTION`.
-4. Filter target dates and `INTERVENTION == 0`.
-5. Select a narrow column set: time, `DUID`, and dispatch MW.
-6. Shift timestamps back 5 minutes if analysis should use interval-start convention.
-7. Load the registration workbook, harmonise `.xls` / `.xlsx` column names, and keep a small metadata table.
-8. Map detailed fuel descriptors into a simplified analysis taxonomy such as coal / gas / hydro / wind / solar / battery.
-9. Join dispatch to metadata only after the dispatch table has already been narrowed.
-10. Aggregate to the analysis level you actually need: hour, day, fuel type, region, or unit.
+1. Start from the variable you actually need.
+2. Choose the narrowest operational table that contains it.
+3. Parse timestamps and interval flags explicitly instead of assuming loader defaults are analysis-ready.
+4. Filter `INTERVENTION == 0` early unless intervention intervals are part of the question.
+5. Normalize interval-end timestamps to interval-start only if that matches the analysis frame you want.
+6. Narrow the operational table before joining metadata.
+7. Join `DUDETAILSUMMARY` for broad DUID identity and region context.
+8. Join the registration workbook only when fuel / technology labels are required.
+9. Join `DUDETAIL` when historically correct capacity matters.
+10. Treat unknown metadata explicitly rather than dropping unmatched operational rows.
 
 ### Good Uses Of This Pattern
 
@@ -346,15 +304,14 @@ This is the concrete workflow implied by the notebook and is worth reusing for s
 
 ### Important Caveats From This Pattern
 
-- the notebook uses `DISPATCHLOAD.INITIALMW` as the working output measure; that is acceptable for dispatch-context analysis, but if the question is strictly actual output then `DISPATCH_UNIT_SCADA.SCADAVALUE` is still the better default
-- the fuel simplification step is useful, but it is a modelling choice; keep the raw descriptor available for auditability
-- the annual capacity-factor section is a sampled approximation, not a full-year historical result
-- using registration workbook capacity is pragmatic, but for historically correct capacity you may need effective-dated `DUDETAIL`
-- negative dispatch values from charging batteries or pumped hydro need explicit treatment before stacked-area plots or energy-share charts
+- `DISPATCHLOAD.INITIALMW` is acceptable for dispatch-context analysis, but if the question is strictly actual output then `DISPATCH_UNIT_SCADA.SCADAVALUE` is the better default.
+- Fuel simplification is a modelling choice; keep the raw descriptor available for auditability.
+- Registration-workbook capacity is pragmatic, but for historically correct capacity you may need effective-dated `DUDETAIL`.
+- Negative dispatch values from charging batteries or pumped hydro need explicit treatment before stacked-area plots or energy-share charts.
 
 ## Common Query Examples
 
-These examples are adapted from the MMS guide's "Common Queries" section and translated into a compact workflow more consistent with this repo. They are intended as working templates, not copy-paste production code.
+These examples are adapted from the MMS guide's "Common Queries" section and translated into compact working patterns. They are intended as templates, not copy-paste production code.
 
 ### 1. Average Regional Price
 
@@ -371,7 +328,7 @@ def parse_dt(lf: pl.LazyFrame, cols: list[str]) -> pl.LazyFrame:
     return lf
 
 avg_price = (
-    pl.scan_parquet("data/nemosis_cache/*DISPATCHPRICE*.parquet")
+    pl.scan_parquet("path/to/cache/*DISPATCHPRICE*.parquet")
     .pipe(parse_dt, ["SETTLEMENTDATE"])
     .filter(pl.col("INTERVENTION") == 0)
     .group_by("REGIONID")
@@ -403,21 +360,21 @@ def parse_dt(lf: pl.LazyFrame, cols: list[str]) -> pl.LazyFrame:
     return lf
 
 reg = pd.read_excel(
-    "data/nemosis_cache/NEM Registration and Exemption List.xlsx",
+    "path/to/NEM Registration and Exemption List.xlsx",
     sheet_name="PU and Scheduled Loads",
 )
 
 duid_meta = pl.from_pandas(reg).lazy().select(["DUID", "Region"])
 
 price = (
-    pl.scan_parquet("data/nemosis_cache/*DISPATCHPRICE*.parquet")
+    pl.scan_parquet("path/to/cache/*DISPATCHPRICE*.parquet")
     .pipe(parse_dt, ["SETTLEMENTDATE"])
     .filter(pl.col("INTERVENTION") == 0)
     .select(["SETTLEMENTDATE", "REGIONID", "RRP"])
 )
 
 scada = (
-    pl.scan_parquet("data/nemosis_cache/*DISPATCH_UNIT_SCADA*.parquet")
+    pl.scan_parquet("path/to/cache/*DISPATCH_UNIT_SCADA*.parquet")
     .pipe(parse_dt, ["SETTLEMENTDATE"])
     .select(["SETTLEMENTDATE", "DUID", "SCADAVALUE"])
 )
@@ -471,7 +428,7 @@ def parse_dt(lf: pl.LazyFrame, cols: list[str]) -> pl.LazyFrame:
     return lf
 
 actual = (
-    pl.scan_parquet("data/nemosis_cache/*DISPATCHPRICE*.parquet")
+    pl.scan_parquet("path/to/cache/*DISPATCHPRICE*.parquet")
     .pipe(parse_dt, ["SETTLEMENTDATE"])
     .filter(pl.col("INTERVENTION") == 0)
     .select([
@@ -482,7 +439,7 @@ actual = (
 )
 
 p5 = (
-    pl.scan_parquet("data/nemosis_cache/*P5MIN_REGIONSOLUTION*.parquet")
+    pl.scan_parquet("path/to/cache/*P5MIN_REGIONSOLUTION*.parquet")
     .pipe(parse_dt, ["INTERVAL_DATETIME", "RUN_DATETIME", "LASTCHANGED"])
     .filter(pl.col("RUN_DATETIME") < pl.col("INTERVAL_DATETIME"))
     .select([
@@ -494,7 +451,7 @@ p5 = (
 )
 
 predispatch = (
-    pl.scan_parquet("data/nemosis_cache/*PREDISPATCHPRICE*.parquet")
+    pl.scan_parquet("path/to/cache/*PREDISPATCHPRICE*.parquet")
     .pipe(parse_dt, ["DATETIME", "LASTCHANGED"])
     .filter(pl.col("INTERVENTION") == 0)
     .filter(pl.col("LASTCHANGED") < pl.col("DATETIME") - pl.duration(hours=1))
@@ -550,4 +507,3 @@ What to remember:
 
 - Matthew Davis, "So you want to query Australian electricity data?": <https://www.mdavis.xyz/mms-guide/>
 - Adam Green, "A Hackers Guide to AEMO & NEM Data": <https://adgefficiency.com/blog/hackers-aemo/>
-- Local project plan: [ideas.md](/home/jask/jaskNEM/ideas.md)
