@@ -16,6 +16,9 @@
 16. How do we increase the price elasticity of energy consumers (thus incentivising their demand to shift to high demand dispatch periods)?
 17. Price cap impact
 18. Analyse Dispatch interval forecast error
+19. Very few scheduled loads registerd in NEM - no commercial incentive and thus prefer RERT payments for benefit without compliance overhead. Big one; what would be the impact of increasing the scheduled % of industrial loads?
+20. Following on - how would price responsive demand dampen volatility thus improving financeability
+
 
 ---
 
