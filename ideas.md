@@ -20,6 +20,8 @@ Price cap impact
 
 Constraints: AEMO does not just intersect supply and demand curves. Australia's grid is far more constrained than most, so AEMO's optimiser, the "NEM Dispatch Engine" (NEMDE) incorporates hundreds of constraints for system strength, transmission line capacity etc. The definition and evaluation of these is in the data.
 
+The thing that makes electricity markets very different from any other market is that “…electrical current…must be produced, to the millisecond, at the moment of consumption, giving an exact balance between power supply and demand. Stable power grids are based on this principle” as Ziegler and his co-authors put it.
+
 
 
 ## Info Sources
@@ -30,7 +32,7 @@ Constraints: AEMO does not just intersect supply and demand curves. Australia's 
 5. currentlyspeaking.substack.com
 6. nemlog.substack.com
 7. benbeattie.substack.com
-
+8. itkservices3.com/posts.html
 
 Reading sequence
 Given where you are in the learning plan, the order that will compound fastest:
