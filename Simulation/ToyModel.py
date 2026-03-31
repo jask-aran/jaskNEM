@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.21.1"
+__generated_with = "0.20.4"
 app = marimo.App(width="medium")
 
 
@@ -184,20 +184,21 @@ def _(condition, dispatch_order, mo, n, output_dir, pd, status):
 @app.cell
 def _(mo):
     mo.md("""
-    ## Step Up: Multi-Day Run with Maintenance
+    ## Step Up: Weekly Run with Maintenance
 
-        This keeps the same single-bus merit-order setup, but extends the
-        horizon to three days and applies a daytime maintenance derating to
-        black coal on the middle day. The point is to show a richer progression
-        without introducing unit commitment or network complexity.
+    This keeps the same single-bus merit-order setup, but extends the
+    horizon to one week at 30-minute resolution and applies a daytime
+    maintenance derating to black coal on day 2. The higher resolution
+    smooths the dispatch and price series without materially increasing
+    solve time.
     """)
     return
 
 
 @app.cell
-def _(n2, np, pd, pypsa):
-    clean2 = pypsa.Network()
-    n2.set_snapshots(pd.date_range("2024-01-01", periods=72, freq="h").as_unit("ns"))
+def _(np, pd, pypsa):
+    n2 = pypsa.Network()
+    n2.set_snapshots(pd.date_range("2024-01-01", periods=336, freq="30min").as_unit("ns"))
     n2.add("Carrier", "AC")
     n2.add("Bus", "NEM", carrier="AC")
 
@@ -213,10 +214,12 @@ def _(n2, np, pd, pypsa):
             1.05, 1.12, 1.23, 1.34, 1.27, 1.10, 0.95, 0.82,
         ]
     )
-    _day_scalars2 = np.repeat([0.97, 0.99, 0.995], repeats=24)
+    # Interpolate hourly shape to 30-min resolution (48 slots/day, 7 days = 336)
+    _base_shape2_30min = np.repeat(_base_shape2, 2)
+    _day_scalars2 = np.repeat([0.97, 0.98, 0.985, 0.99, 0.992, 0.995, 0.997], repeats=48)
     _rng2 = np.random.default_rng(7)
-    _noise2 = _rng2.normal(loc=0.0, scale=0.012, size=72)
-    demand_profile2 = (8000 * (np.tile(_base_shape2, 3) * _day_scalars2 + _noise2)).clip(min=6000)
+    _noise2 = _rng2.normal(loc=0.0, scale=0.012, size=336)
+    demand_profile2 = (8000 * (np.tile(_base_shape2_30min, 7) * _day_scalars2 + _noise2)).clip(min=6000)
     n2.add("Load", "Demand", bus="NEM", p_set=pd.Series(demand_profile2, index=n2.snapshots))
 
     _black_coal_availability2 = pd.Series(1.0, index=n2.snapshots)
@@ -234,14 +237,14 @@ def _(n2, np, pd, pypsa):
     )
 
     status2, condition2 = n2.optimize(solver_name="highs")
-    return condition2, dispatch_order2, status2
+    return condition2, dispatch_order2, n2, status2
 
 
 @app.cell
 def _(dispatch_order2, export_figure, n2, plt):
-    dispatch_fig2, dispatch_ax2 = plt.subplots(figsize=(12, 4))
+    dispatch_fig2, dispatch_ax2 = plt.subplots(figsize=(16, 4))
     n2.generators_t.p[dispatch_order2].plot.area(ax=dispatch_ax2, linewidth=0)
-    dispatch_ax2.set_title("Multi-Day Dispatch with Black Coal Maintenance")
+    dispatch_ax2.set_title("Weekly Dispatch with Black Coal Maintenance (30-min)")
     dispatch_ax2.set_xlabel("Snapshot")
     dispatch_ax2.set_ylabel("Dispatch (MW)")
     dispatch_ax2.legend(title="Generator", ncols=4, loc="upper center", bbox_to_anchor=(0.5, 1.2))
@@ -253,9 +256,9 @@ def _(dispatch_order2, export_figure, n2, plt):
 
 @app.cell
 def _(export_figure, n2, plt):
-    price_fig2, price_ax2 = plt.subplots(figsize=(12, 3))
+    price_fig2, price_ax2 = plt.subplots(figsize=(16, 3))
     n2.buses_t.marginal_price["NEM"].plot(ax=price_ax2, color="#b22222", linewidth=2)
-    price_ax2.set_title("Multi-Day Shadow Price with Maintenance")
+    price_ax2.set_title("Weekly Shadow Price with Maintenance (30-min)")
     price_ax2.set_xlabel("Snapshot")
     price_ax2.set_ylabel("Price ($/MWh)")
     price_ax2.grid(axis="y", alpha=0.2)

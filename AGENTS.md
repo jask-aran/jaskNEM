@@ -2,7 +2,11 @@
 
 ## Marimo Notebooks
 
-When working with Marimo `.py` notebooks, use the `marimo-notebook` skill. (Obtained via Skills.sh)
+When working with **or answering questions about** Marimo `.py` notebooks, invoke the `marimo-notebook` skill first. (Obtained via Skills.sh)
+
+After modifying a marimo notebook, always:
+1. Run `uvx marimo check <notebook.py>` to lint for common mistakes.
+2. Run `uv run <notebook.py>` in script mode to execute all cells and verify outputs. Read any saved PNGs or CSVs from the notebook's output directory to inspect results.
 
 ## Working with Jupyter Notebooks (.ipynb files)
 
