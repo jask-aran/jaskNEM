@@ -8,6 +8,7 @@ dependencies = [
     "highspy",
     "ipympl",
     "jupyter",
+    "jupyter-server-documents>=0.1.2",
     "marimo>=0.21.1",
     "matplotlib",
     "nemosis==3.8.1",

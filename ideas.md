@@ -18,6 +18,7 @@
 18. Analyse Dispatch interval forecast error
 19. Very few scheduled loads registerd in NEM - no commercial incentive and thus prefer RERT payments for benefit without compliance overhead. Big one; what would be the impact of increasing the scheduled % of industrial loads?
 20. Following on - how would price responsive demand dampen volatility thus improving financeability
+21. Plot DISPATCHLOAD for battery DUID
 
 
 ---

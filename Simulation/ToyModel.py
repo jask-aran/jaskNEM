@@ -1,7 +1,7 @@
 import marimo
 
-__generated_with = "0.20.4"
-app = marimo.App()
+__generated_with = "0.21.1"
+app = marimo.App(width="medium")
 
 
 @app.cell
@@ -28,13 +28,9 @@ def _(mo):
 
 
 @app.cell
-def _(pd):
+def _(pd, pypsa):
     snapshots = pd.date_range("2024-01-01", periods=24, freq="h").as_unit("ns")
-    return (snapshots,)
 
-
-@app.cell
-def _(pd, pypsa, snapshots):
     n = pypsa.Network()
     n.set_snapshots(snapshots)
     n.add("Carrier", "AC")
@@ -51,64 +47,9 @@ def _(pd, pypsa, snapshots):
         ["Brown Coal", "Black Coal", "CCGT Gas", "OCGT Gas"],
         name="generator",
     )
-    return dispatch_order, n
 
-
-@app.cell
-def _(n):
     status, condition = n.optimize(solver_name="highs")
-    return condition, status
-
-
-@app.cell
-def _(dispatch_order, n, pd):
-    results = pd.concat(
-        [
-            n.loads_t.p[["Demand"]].rename(columns={"Demand": "demand_mw"}),
-            n.buses_t.marginal_price[["NEM"]].rename(
-                columns={"NEM": "shadow_price_per_mwh"}
-            ),
-            n.generators_t.p[dispatch_order].rename(
-                columns=lambda name: f"{name.lower().replace(' ', '_')}_mw"
-            ),
-        ],
-        axis=1,
-    )
-    return (results,)
-
-
-@app.cell
-def _(dispatch_order, n, pd, results):
-    generator_summary = (
-        n.generators.loc[dispatch_order, ["p_nom", "marginal_cost"]]
-        .rename(columns={"p_nom": "capacity_mw", "marginal_cost": "marginal_cost_per_mwh"})
-        .assign(
-            dispatched_mwh=n.generators_t.p[dispatch_order].sum(),
-            average_dispatch_mw=n.generators_t.p[dispatch_order].mean(),
-        )
-        .reset_index(names="generator")
-    )
-    generator_summary["capacity_factor"] = (
-        generator_summary["average_dispatch_mw"] / generator_summary["capacity_mw"]
-    ).round(3)
-
-    system_summary = pd.DataFrame(
-        {
-            "metric": [
-                "Average demand (MW)",
-                "Average shadow price ($/MWh)",
-                "Peak shadow price ($/MWh)",
-                "Total generation (MWh)",
-            ],
-            "value": [
-                results["demand_mw"].mean(),
-                results["shadow_price_per_mwh"].mean(),
-                results["shadow_price_per_mwh"].max(),
-                n.generators_t.p[dispatch_order].sum().sum(),
-            ],
-        }
-    )
-    return generator_summary, system_summary
+    return condition, dispatch_order, n, status
 
 
 @app.cell
@@ -125,9 +66,9 @@ def _(dispatch_order, n, plt):
 
 
 @app.cell
-def _(plt, results):
+def _(n, plt):
     price_fig, price_ax = plt.subplots(figsize=(10, 3))
-    results["shadow_price_per_mwh"].plot(ax=price_ax, color="#d2691e", linewidth=2)
+    n.buses_t.marginal_price["NEM"].plot(ax=price_ax, color="#d2691e", linewidth=2)
     price_ax.set_title("Toy Model Shadow Price")
     price_ax.set_xlabel("Snapshot")
     price_ax.set_ylabel("Price ($/MWh)")
@@ -137,7 +78,48 @@ def _(plt, results):
 
 
 @app.cell
-def _(condition, generator_summary, mo, results, status, system_summary):
+def _(condition, dispatch_order, mo, n, pd, status):
+    _results = pd.concat(
+        [
+            n.loads_t.p[["Demand"]].rename(columns={"Demand": "demand_mw"}),
+            n.buses_t.marginal_price[["NEM"]].rename(columns={"NEM": "shadow_price_per_mwh"}),
+            n.generators_t.p[dispatch_order].rename(
+                columns=lambda name: f"{name.lower().replace(' ', '_')}_mw"
+            ),
+        ],
+        axis=1,
+    )
+
+    _generator_summary = (
+        n.generators.loc[dispatch_order, ["p_nom", "marginal_cost"]]
+        .rename(columns={"p_nom": "capacity_mw", "marginal_cost": "marginal_cost_per_mwh"})
+        .assign(
+            dispatched_mwh=n.generators_t.p[dispatch_order].sum(),
+            average_dispatch_mw=n.generators_t.p[dispatch_order].mean(),
+        )
+        .reset_index(names="generator")
+    )
+    _generator_summary["capacity_factor"] = (
+        _generator_summary["average_dispatch_mw"] / _generator_summary["capacity_mw"]
+    ).round(3)
+
+    _system_summary = pd.DataFrame(
+        {
+            "metric": [
+                "Average demand (MW)",
+                "Average shadow price ($/MWh)",
+                "Peak shadow price ($/MWh)",
+                "Total generation (MWh)",
+            ],
+            "value": [
+                _results["demand_mw"].mean(),
+                _results["shadow_price_per_mwh"].mean(),
+                _results["shadow_price_per_mwh"].max(),
+                n.generators_t.p[dispatch_order].sum().sum(),
+            ],
+        }
+    )
+
     mo.vstack(
         [
             mo.md(
@@ -154,8 +136,8 @@ def _(condition, generator_summary, mo, results, status, system_summary):
                 and gas never enters because demand never rises above 8,000 MW.
                 """
             ),
-            mo.hstack([system_summary, generator_summary], widths="equal"),
-            results,
+            mo.hstack([_system_summary, _generator_summary], widths="equal"),
+            _results,
         ]
     )
     return

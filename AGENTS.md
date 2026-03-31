@@ -2,7 +2,15 @@
 
 ## Marimo Notebooks
 
-When creating or editing marimo notebooks, read `marimo.md` at the project root for detailed guidelines on cell structure, reactivity, UI elements, and best practices.
+When working with Marimo `.py` notebooks, use the `marimo-notebook` skill. (Obtained via Skills.sh)
+
+## Working with Jupyter Notebooks (.ipynb files)
+
+When the user asks to read, edit, execute, or work with `.ipynb` files, use the notebook-cli skill, which provides the `nb` command-line tool.
+
+Use `nb` in local file mode only. Do not use the built-in Read/Write tools for `.ipynb` files. Do not run `nb connect`, do not attempt to connect `nb` to a Jupyter server or kernel, and do not rely on remote/live collaboration features for notebook edits or execution. Prefer direct local notebook file operations with `nb`.
+
+(Obtained via https://github.com/jupyter-ai-contrib/nb-cli)
 
 
 
