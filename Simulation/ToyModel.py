@@ -8,10 +8,21 @@ app = marimo.App(width="medium")
 def _():
     import os
     from pathlib import Path
+    import sys
     import numpy as np
     import marimo as mo
     from pathlib import Path
     import re
+
+    repo_root = Path(__file__).resolve().parent.parent
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+
+    from Simulation.pypsa_viz import (
+        build_dispatch_price_figure,
+        build_market_outcomes_dashboard,
+        build_market_outcomes_tables,
+    )
 
     mplconfigdir = Path(__file__).resolve().parent / ".mplconfig"
     mplconfigdir.mkdir(parents=True, exist_ok=True)
@@ -36,7 +47,18 @@ def _():
         fig.savefig(output_path, dpi=160, bbox_inches="tight")
         return output_path
 
-    return export_figure, mo, np, output_dir, pd, plt, pypsa
+    return (
+        build_dispatch_price_figure,
+        build_market_outcomes_dashboard,
+        build_market_outcomes_tables,
+        export_figure,
+        mo,
+        np,
+        output_dir,
+        pd,
+        plt,
+        pypsa,
+    )
 
 
 @app.cell
@@ -442,29 +464,39 @@ def _(np, pd, pypsa):
 
 
 @app.cell
-def _(dispatch_order3, export_figure, n3, plt):
-    dispatch_fig3, dispatch_ax3 = plt.subplots(figsize=(16, 4))
-    n3.generators_t.p[dispatch_order3].plot.area(ax=dispatch_ax3, linewidth=0)
-    dispatch_ax3.set_title("Thu–Sun Dispatch — VIC Solar Penetration, Pre-BESS (10-min)")
-    dispatch_ax3.set_xlabel("Snapshot")
-    dispatch_ax3.set_ylabel("Dispatch (MW)")
-    dispatch_ax3.legend(title="Generator", ncols=5, loc="upper center", bbox_to_anchor=(0.5, 1.2))
-    dispatch_ax3.grid(axis="y", alpha=0.2)
+def _(build_dispatch_price_figure, dispatch_order3, export_figure, n3):
+    dispatch_fig3 = build_dispatch_price_figure(
+        n3,
+        dispatch_order=dispatch_order3,
+        panels=("dispatch",),
+        title=None,
+        dispatch_title="Thu–Sun Dispatch — VIC Solar Penetration, Pre-BESS (10-min)",
+        legend_title="Generator",
+        legend_ncols=5,
+        legend_loc="upper center",
+        legend_bbox=(0.5, 1.2),
+        figure_legend=False,
+        figsize=(16, 4),
+    )
     export_figure(dispatch_fig3)
-    dispatch_ax3
+    dispatch_fig3
     return
 
 
 @app.cell
-def _(export_figure, n3, plt):
-    price_fig3, price_ax3 = plt.subplots(figsize=(16, 3))
-    n3.buses_t.marginal_price["NEM"].plot(ax=price_ax3, color="#2e8b57", linewidth=1.5)
-    price_ax3.set_title("Thu–Sun Shadow Price — VIC Solar Penetration, Pre-BESS (10-min)")
-    price_ax3.set_xlabel("Snapshot")
-    price_ax3.set_ylabel("Price ($/MWh)")
-    price_ax3.grid(axis="y", alpha=0.2)
+def _(build_dispatch_price_figure, export_figure, n3):
+    price_fig3 = build_dispatch_price_figure(
+        n3,
+        panels=("price",),
+        price_bus="NEM",
+        price_color="#2e8b57",
+        price_plot_style="line",
+        title=None,
+        price_title="Thu–Sun Shadow Price — VIC Solar Penetration, Pre-BESS (10-min)",
+        figsize=(16, 3),
+    )
     export_figure(price_fig3)
-    price_ax3
+    price_fig3
     return
 
 
@@ -617,16 +649,22 @@ def _(condition4, mo, status4):
 
 
 @app.cell
-def _(dispatch_order4, export_figure, n4, plt):
-    dispatch_fig4, dispatch_ax4 = plt.subplots(figsize=(16, 4))
-    n4.generators_t.p[dispatch_order4].clip(lower=0.0).plot.area(ax=dispatch_ax4, linewidth=0)
-    dispatch_ax4.set_title("N4 Unit Dispatch — Multi-Unit Thermal with Ramp Constraints")
-    dispatch_ax4.set_xlabel("Snapshot")
-    dispatch_ax4.set_ylabel("Dispatch (MW)")
-    dispatch_ax4.legend(title="Generator", ncols=3, loc="upper center", bbox_to_anchor=(0.5, 1.2))
-    dispatch_ax4.grid(axis="y", alpha=0.2)
+def _(build_dispatch_price_figure, dispatch_order4, export_figure, n4):
+    dispatch_fig4 = build_dispatch_price_figure(
+        n4,
+        dispatch_order=dispatch_order4,
+        panels=("dispatch",),
+        title=None,
+        dispatch_title="N4 Unit Dispatch — Multi-Unit Thermal with Ramp Constraints",
+        legend_title="Generator",
+        legend_ncols=3,
+        legend_loc="upper center",
+        legend_bbox=(0.5, 1.2),
+        figure_legend=False,
+        figsize=(16, 4),
+    )
     export_figure(dispatch_fig4, stem="n4_dispatch")
-    dispatch_ax4
+    dispatch_fig4
     return
 
 
@@ -843,91 +881,43 @@ def _(condition5, mo, status5):
 
 
 @app.cell
-def _(dispatch_order5, export_figure, n5, plt):
-    dispatch_fig5, (dispatch_ax5, price_ax5, soc_ax5) = plt.subplots(
-        3, 1, figsize=(16, 9), sharex=True
+def _(build_dispatch_price_figure, dispatch_order5, export_figure, n5):
+    dispatch_fig5 = build_dispatch_price_figure(
+        n5,
+        dispatch_order=dispatch_order5,
+        panels=("dispatch", "price", "soc"),
+        storage_name="BESS",
+        price_bus="NEM",
+        near_zero_price_threshold=0.5,
+        title="N5 Dispatch, Shadow Price, and BESS State of Charge",
+        dispatch_title="Unit Dispatch (+ generation / BESS discharge, - BESS charge)",
+        price_title="Shadow Price",
+        soc_title="BESS State of Charge",
+        price_color="#b22222",
+        price_plot_style="step",
+        legend_title="Asset",
+        legend_ncols=4,
+        legend_loc="lower center",
+        legend_bbox=(0.5, -0.1),
+        figure_legend=True,
+        figsize=(16, 9),
+        date_tick_interval_hours=6,
     )
-
-    _x = n5.snapshots.to_pydatetime()
-    _dispatch = n5.generators_t.p[dispatch_order5].clip(lower=0.0).copy()
-    _dispatch["BESS discharge"] = n5.storage_units_t.p_dispatch["BESS"].clip(lower=0.0)
-    _dispatch_colors = [
-        "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
-        "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
-    ]
-    _stack_handles = dispatch_ax5.stackplot(
-        _x,
-        *[_dispatch[column].to_numpy() for column in _dispatch.columns],
-        labels=_dispatch.columns,
-        colors=_dispatch_colors[: len(_dispatch.columns)],
-        alpha=0.95,
-    )
-    _charge = n5.storage_units_t.p_store["BESS"].clip(lower=0.0)
-    _charge_handle = dispatch_ax5.fill_between(
-        _x,
-        0.0,
-        -_charge.to_numpy(),
-        color="#4c78a8",
-        alpha=0.30,
-        label="BESS charge",
-    )
-    dispatch_ax5.axhline(0.0, color="black", linewidth=0.8, alpha=0.6)
-    dispatch_ax5.set_title(
-        "Unit Dispatch (+ generation / BESS discharge, - BESS charge)", pad=12
-    )
-    dispatch_ax5.set_ylabel("Dispatch (MW)")
-    dispatch_ax5.grid(axis="y", alpha=0.2)
-
-    _price = n5.buses_t.marginal_price["NEM"]
-    price_ax5.step(_x, _price.to_numpy(), where="post", color="#b22222", linewidth=1.8)
-    price_ax5.set_title("Shadow Price")
-    price_ax5.set_ylabel("Price ($/MWh)")
-    price_ax5.grid(axis="y", alpha=0.2)
-
-    _soc = n5.storage_units_t.state_of_charge["BESS"]
-    soc_ax5.plot(_x, _soc.to_numpy(), color="#1f77b4", linewidth=2.2, label="SOC")
-    soc_ax5.fill_between(_x, _soc.to_numpy(), 0.0, color="#1f77b4", alpha=0.08)
-    soc_ax5.set_title("BESS State of Charge")
-    soc_ax5.set_xlabel("Snapshot")
-    soc_ax5.set_ylabel("SOC (MWh)")
-    soc_ax5.set_ylim(0, 1200)
-    soc_ax5.grid(axis="y", alpha=0.2)
-    _zero_mask = (_price <= 0.5).astype(bool)
-    _zero_starts = _zero_mask & ~_zero_mask.shift(1, fill_value=False)
-    _zero_stops = _zero_mask & ~_zero_mask.shift(-1, fill_value=False)
-    _zero_start_times = n5.snapshots[_zero_starts]
-    _zero_stop_times = n5.snapshots[_zero_stops]
-    for _start, _stop in zip(_zero_start_times, _zero_stop_times, strict=False):
-        _start_dt = _start.to_pydatetime()
-        _stop_dt = (_stop + n5.snapshots.freq).to_pydatetime()
-        dispatch_ax5.axvspan(_start_dt, _stop_dt, color="#d62728", alpha=0.08, lw=0)
-        price_ax5.axvspan(_start_dt, _stop_dt, color="#d62728", alpha=0.08, lw=0)
-        soc_ax5.axvspan(_start_dt, _stop_dt, color="#d62728", alpha=0.08, lw=0)
-
-    _mdates = plt.matplotlib.dates
-    soc_ax5.xaxis.set_major_locator(_mdates.HourLocator(interval=6))
-    soc_ax5.xaxis.set_major_formatter(_mdates.DateFormatter("%d\n%H"))
-    soc_ax5.tick_params(axis="x", labelrotation=0)
-    _legend_handles = list(_stack_handles) + [_charge_handle]
-    _legend_labels = list(_dispatch.columns) + ["BESS charge"]
-    dispatch_fig5.legend(
-        _legend_handles,
-        _legend_labels,
-        title="Asset",
-        ncols=4,
-        loc="lower center",
-        bbox_to_anchor=(0.5, -0.1),
-        frameon=True,
-    )
-    dispatch_fig5.suptitle("N5 Dispatch, Shadow Price, and BESS State of Charge", y=0.98)
-    dispatch_fig5.subplots_adjust(top=0.90, hspace=0.22)
     export_figure(dispatch_fig5, stem="n5_dispatch_soc")
-    dispatch_ax5
+    dispatch_fig5
     return
 
 
 @app.cell
-def _(dispatch_order5, n4, n5, output_dir, pd, thermal_units_n4):
+def _(
+    build_market_outcomes_tables,
+    dispatch_order5,
+    n4,
+    n5,
+    output_dir,
+    pd,
+    thermal_units_n4,
+):
     _dt = 10.0 / 60.0  # hours per 10-min snapshot
 
     # --- results_n5.csv ---
@@ -997,93 +987,15 @@ def _(dispatch_order5, n4, n5, output_dir, pd, thermal_units_n4):
     }]).to_csv(output_dir / "bess_economics_n5.csv", index=False)
 
     # --- dispatch_outcomes_n5.csv ---
-    _total_demand_mwh = (_results["demand_mw"] * _dt).sum()
-    _asset_rows = []
-
-    def _safe_div(num, den):
-        return num / den if den and abs(den) > 1e-12 else float("nan")
-
-    for _asset in dispatch_order5:
-        _dispatch_mw = n5.generators_t.p[_asset].clip(lower=0.0)
-        _dispatch_mwh = (_dispatch_mw * _dt).sum()
-        _capacity_mw = float(n5.generators.at[_asset, "p_nom"])
-        _gross_revenue = (_dispatch_mw * _price * _dt).sum()
-        _marginal_cost = float(n5.generators.at[_asset, "marginal_cost"])
-        _variable_cost = (_dispatch_mw * _marginal_cost * _dt).sum()
-        _gross_margin = _gross_revenue - _variable_cost
-        _asset_rows.append(
-            {
-                "asset": _asset,
-                "type": n5.generators.at[_asset, "carrier"],
-                "capacity_mw": _capacity_mw,
-                "dispatched_mwh": _dispatch_mwh,
-                "charge_mwh": float("nan"),
-                "share_of_total_demand_pct": _safe_div(_dispatch_mwh, _total_demand_mwh) * 100.0,
-                "active_hours": (_dispatch_mw > 0).sum() * _dt,
-                "charge_hours": float("nan"),
-                "average_dispatch_mw": _dispatch_mw.mean(),
-                "average_loading": _safe_div(_dispatch_mw.mean(), _capacity_mw),
-                "realized_sell_price_aud_per_mwh": _safe_div(_gross_revenue, _dispatch_mwh),
-                "gross_revenue_aud": _gross_revenue,
-                "variable_cost_aud": _variable_cost,
-                "charging_cost_aud": float("nan"),
-                "gross_margin_aud": _gross_margin,
-                "margin_aud_per_mwh": _safe_div(_gross_margin, _dispatch_mwh),
-            }
-        )
-
-    _bess_capacity_mw = float(n5.storage_units.at["BESS", "p_nom"])
-    _bess_dispatched_mwh = (_discharge * _dt).sum()
-    _bess_charge_mwh = (_charge * _dt).sum()
-    _bess_revenue = (_discharge * _price * _dt).sum()
-    _bess_charge_cost = (_charge * _price * _dt).sum()
-    _bess_margin = _bess_revenue - _bess_charge_cost
-    _asset_rows.append(
-        {
-            "asset": "BESS",
-            "type": "bess",
-            "capacity_mw": _bess_capacity_mw,
-            "dispatched_mwh": _bess_dispatched_mwh,
-            "charge_mwh": _bess_charge_mwh,
-            "share_of_total_demand_pct": _safe_div(_bess_dispatched_mwh, _total_demand_mwh) * 100.0,
-            "active_hours": (_discharge > 0).sum() * _dt,
-            "charge_hours": (_charge > 0).sum() * _dt,
-            "average_dispatch_mw": _discharge.mean(),
-            "average_loading": _safe_div(_discharge.mean(), _bess_capacity_mw),
-            "realized_sell_price_aud_per_mwh": _safe_div(_bess_revenue, _bess_dispatched_mwh),
-            "gross_revenue_aud": _bess_revenue,
-            "variable_cost_aud": 0.0,
-            "charging_cost_aud": _bess_charge_cost,
-            "gross_margin_aud": _bess_margin,
-            "margin_aud_per_mwh": _safe_div(_bess_margin, _bess_dispatched_mwh),
-        }
+    dispatch_outcomes_n5, market_totals_n5 = build_market_outcomes_tables(
+        n5,
+        dispatch_order=dispatch_order5,
+        thermal_units=thermal_units_n4,
+        storage_name="BESS",
+        demand_name="Demand",
+        price_bus="NEM",
     )
-
-    dispatch_outcomes_n5 = pd.DataFrame(_asset_rows).sort_values(
-        "gross_margin_aud", ascending=False
-    ).reset_index(drop=True)
     dispatch_outcomes_n5.to_csv(output_dir / "dispatch_outcomes_n5.csv", index=False)
-
-    market_totals_n5 = pd.DataFrame(
-        {
-            "metric": [
-                "Total demand (MWh)",
-                "Total generator supply (MWh)",
-                "Total BESS discharge (MWh)",
-                "Total BESS charge (MWh)",
-                "Average shadow price ($/MWh)",
-                "Peak shadow price ($/MWh)",
-            ],
-            "value": [
-                _total_demand_mwh,
-                (_results[[f"{name.lower().replace(' ', '_')}_mw" for name in dispatch_order5]] * _dt).sum().sum(),
-                _bess_dispatched_mwh,
-                _bess_charge_mwh,
-                _price.mean(),
-                _price.max(),
-            ],
-        }
-    )
     return dispatch_outcomes_n5, market_totals_n5
 
 
@@ -1145,111 +1057,13 @@ def _(dispatch_outcomes_n5, market_totals_n5, mo):
 
 
 @app.cell
-def _(dispatch_outcomes_n5, export_figure, plt):
-    _asset_order = dispatch_outcomes_n5["asset"].tolist()
-    _y = list(range(len(_asset_order)))
-    _type_colors = {
-        "solar": "#f2c94c",
-        "brown_coal": "#8c564b",
-        "black_coal": "#4e79a7",
-        "ccgt": "#e15759",
-        "ocgt": "#f28e2b",
-        "scarcity": "#b07aa1",
-        "bess": "#59a14f",
-    }
-    _bar_colors = [_type_colors.get(_type, "#7f7f7f") for _type in dispatch_outcomes_n5["type"]]
-
-    def _fmt_money(value):
-        _abs = abs(value)
-        if _abs >= 1_000_000:
-            return f"${value / 1_000_000:.2f}m"
-        if _abs >= 1_000:
-            return f"${value / 1_000:.1f}k"
-        return f"${value:.0f}"
-
-    outcomes_fig, (margin_ax, share_ax, activity_ax) = plt.subplots(
-        1, 3, figsize=(18, 6), sharey=True
+def _(build_market_outcomes_dashboard, dispatch_outcomes_n5, export_figure):
+    outcomes_fig = build_market_outcomes_dashboard(
+        dispatch_outcomes_n5,
+        title="N5 Market Outcomes by Asset",
     )
-
-    _margin = dispatch_outcomes_n5["gross_margin_aud"]
-    _margin_colors = ["#2f7d32" if value >= 0 else "#c73e1d" for value in _margin]
-    margin_ax.barh(_y, _margin, color=_margin_colors, alpha=0.9)
-    margin_ax.set_title("Gross Margin by Asset")
-    margin_ax.set_xlabel("Gross Margin (AUD)")
-    margin_ax.grid(axis="x", alpha=0.2)
-    for _idx, _value in enumerate(_margin):
-        _offset = max(abs(_margin).max() * 0.01, 5_000)
-        _x_text = _value + _offset if _value >= 0 else _value - _offset
-        margin_ax.text(
-            _x_text,
-            _idx,
-            _fmt_money(_value),
-            va="center",
-            ha="left" if _value >= 0 else "right",
-            fontsize=9,
-        )
-
-    _share = dispatch_outcomes_n5["share_of_total_demand_pct"]
-    share_ax.barh(_y, _share, color=_bar_colors, alpha=0.9)
-    share_ax.set_title("Dispatch Share of Demand")
-    share_ax.set_xlabel("Share of Total Demand (%)")
-    share_ax.grid(axis="x", alpha=0.2)
-    for _idx, (_share_pct, _mwh) in enumerate(
-        zip(_share, dispatch_outcomes_n5["dispatched_mwh"], strict=False)
-    ):
-        share_ax.text(
-            _share_pct + 0.35,
-            _idx,
-            f"{_mwh:.0f} MWh",
-            va="center",
-            ha="left",
-            fontsize=9,
-        )
-
-    _active = dispatch_outcomes_n5["active_hours"].fillna(0.0)
-    _charge_hours = dispatch_outcomes_n5["charge_hours"].fillna(0.0)
-    _bar_height = 0.36
-    activity_ax.barh(
-        [_value - _bar_height / 2 for _value in _y],
-        _active,
-        height=_bar_height,
-        color="#4e79a7",
-        label="Active hours",
-        alpha=0.9,
-    )
-    activity_ax.barh(
-        [_value + _bar_height / 2 for _value in _y],
-        _charge_hours,
-        height=_bar_height,
-        color="#76b7b2",
-        label="Charge hours",
-        alpha=0.9,
-    )
-    activity_ax.set_title("Activity and Price Capture")
-    activity_ax.set_xlabel("Hours")
-    activity_ax.grid(axis="x", alpha=0.2)
-    activity_ax.legend(loc="upper left")
-
-    _price_ax = activity_ax.twiny()
-    _price_ax.scatter(
-        dispatch_outcomes_n5["realized_sell_price_aud_per_mwh"],
-        _y,
-        color="#222222",
-        marker="o",
-        s=36,
-        label="Realized sell price",
-        zorder=3,
-    )
-    _price_ax.set_xlabel("Realized Sell Price ($/MWh)")
-
-    activity_ax.set_yticks(_y)
-    activity_ax.set_yticklabels(_asset_order)
-    activity_ax.invert_yaxis()
-
-    outcomes_fig.suptitle("N5 Market Outcomes by Asset", y=0.98)
-    outcomes_fig.subplots_adjust(top=0.86, wspace=0.28)
     export_figure(outcomes_fig, stem="n5_outcomes_dashboard")
-    margin_ax
+    outcomes_fig
     return
 
 
