@@ -47,6 +47,53 @@ def _():
         fig.savefig(output_path, dpi=160, bbox_inches="tight")
         return output_path
 
+    def render_market_outcomes_block(dispatch_outcomes, market_totals, *, heading, notes_md):
+        display = dispatch_outcomes.copy()
+        pct_cols = ["share_of_total_demand_pct", "average_loading"]
+        hour_cols = ["active_hours", "charge_hours"]
+        money_cols = [
+            "realized_sell_price_aud_per_mwh",
+            "gross_revenue_aud",
+            "variable_cost_aud",
+            "charging_cost_aud",
+            "gross_margin_aud",
+            "margin_aud_per_mwh",
+        ]
+        energy_cols = ["capacity_mw", "dispatched_mwh", "charge_mwh", "average_dispatch_mw"]
+
+        for cols in (pct_cols, hour_cols, money_cols, energy_cols):
+            display[cols] = display[cols].round(1)
+
+        display = display[
+            [
+                "asset",
+                "type",
+                "capacity_mw",
+                "dispatched_mwh",
+                "charge_mwh",
+                "share_of_total_demand_pct",
+                "active_hours",
+                "charge_hours",
+                "average_loading",
+                "realized_sell_price_aud_per_mwh",
+                "gross_revenue_aud",
+                "variable_cost_aud",
+                "charging_cost_aud",
+                "gross_margin_aud",
+                "margin_aud_per_mwh",
+            ]
+        ]
+
+        totals_display = market_totals.copy()
+        totals_display["value"] = totals_display["value"].round(1)
+
+        return mo.vstack(
+            [
+                mo.md(f"## {heading}\n\n{notes_md}"),
+                mo.hstack([totals_display, display], widths=[0.28, 0.72]),
+            ]
+        )
+
     return (
         build_dispatch_price_figure,
         build_market_outcomes_dashboard,
@@ -58,6 +105,7 @@ def _():
         pd,
         plt,
         pypsa,
+        render_market_outcomes_block,
     )
 
 
@@ -79,11 +127,13 @@ def _(np, pd, pypsa):
     n.set_snapshots(pd.date_range("2024-01-01", periods=24, freq="h").as_unit("ns"))
     n.add("Carrier", "AC")
     n.add("Bus", "NEM", carrier="AC")
+    for _carrier in ["brown_coal", "black_coal", "ccgt", "ocgt"]:
+        n.add("Carrier", _carrier)
 
-    n.add("Generator", "Brown Coal", bus="NEM", p_nom=3000, marginal_cost=25)
-    n.add("Generator", "Black Coal", bus="NEM", p_nom=5000, marginal_cost=40)
-    n.add("Generator", "CCGT Gas", bus="NEM", p_nom=2000, marginal_cost=85)
-    n.add("Generator", "OCGT Gas", bus="NEM", p_nom=800, marginal_cost=180)
+    n.add("Generator", "Brown Coal", bus="NEM", carrier="brown_coal", p_nom=3000, marginal_cost=25)
+    n.add("Generator", "Black Coal", bus="NEM", carrier="black_coal", p_nom=5000, marginal_cost=40)
+    n.add("Generator", "CCGT Gas", bus="NEM", carrier="ccgt", p_nom=2000, marginal_cost=85)
+    n.add("Generator", "OCGT Gas", bus="NEM", carrier="ocgt", p_nom=800, marginal_cost=180)
 
     # Stylized daily demand shape with mild random noise.
     base_shape = np.array(
@@ -204,6 +254,33 @@ def _(condition, dispatch_order, mo, n, output_dir, pd, status):
 
 
 @app.cell
+def _(build_market_outcomes_tables, dispatch_order, n, output_dir):
+    dispatch_outcomes_n1, market_totals_n1 = build_market_outcomes_tables(
+        n,
+        dispatch_order=dispatch_order,
+        demand_name="Demand",
+        price_bus="NEM",
+    )
+    dispatch_outcomes_n1.to_csv(output_dir / "dispatch_outcomes_n1.csv", index=False)
+    market_totals_n1.to_csv(output_dir / "market_totals_n1.csv", index=False)
+    return dispatch_outcomes_n1, market_totals_n1
+
+
+@app.cell
+def _(dispatch_outcomes_n1, market_totals_n1, render_market_outcomes_block):
+    render_market_outcomes_block(
+        dispatch_outcomes_n1,
+        market_totals_n1,
+        heading="N1 Dispatch Outcomes",
+        notes_md=(
+            "Demand share uses **total N1 demand energy** over the full horizon. "
+            "Gross margin is **revenue minus variable cost** for generator dispatch."
+        ),
+    )
+    return
+
+
+@app.cell
 def _(mo):
     mo.md("""
     ## Step Up: Weekly Run with Maintenance
@@ -223,11 +300,13 @@ def _(np, pd, pypsa):
     n2.set_snapshots(pd.date_range("2024-01-01", periods=336, freq="30min").as_unit("ns"))
     n2.add("Carrier", "AC")
     n2.add("Bus", "NEM", carrier="AC")
+    for _carrier in ["brown_coal", "black_coal", "ccgt", "ocgt"]:
+        n2.add("Carrier", _carrier)
 
-    n2.add("Generator", "Brown Coal", bus="NEM", p_nom=3000, marginal_cost=25)
-    n2.add("Generator", "Black Coal", bus="NEM", p_nom=5000, marginal_cost=40)
-    n2.add("Generator", "CCGT Gas", bus="NEM", p_nom=2000, marginal_cost=85)
-    n2.add("Generator", "OCGT Gas", bus="NEM", p_nom=800, marginal_cost=180)
+    n2.add("Generator", "Brown Coal", bus="NEM", carrier="brown_coal", p_nom=3000, marginal_cost=25)
+    n2.add("Generator", "Black Coal", bus="NEM", carrier="black_coal", p_nom=5000, marginal_cost=40)
+    n2.add("Generator", "CCGT Gas", bus="NEM", carrier="ccgt", p_nom=2000, marginal_cost=85)
+    n2.add("Generator", "OCGT Gas", bus="NEM", carrier="ocgt", p_nom=800, marginal_cost=180)
 
     _base_shape2 = np.array(
         [
@@ -361,6 +440,33 @@ def _(condition2, dispatch_order2, mo, n2, output_dir, pd, status2):
 
 
 @app.cell
+def _(build_market_outcomes_tables, dispatch_order2, n2, output_dir):
+    dispatch_outcomes_n2, market_totals_n2 = build_market_outcomes_tables(
+        n2,
+        dispatch_order=dispatch_order2,
+        demand_name="Demand",
+        price_bus="NEM",
+    )
+    dispatch_outcomes_n2.to_csv(output_dir / "dispatch_outcomes_n2.csv", index=False)
+    market_totals_n2.to_csv(output_dir / "market_totals_n2.csv", index=False)
+    return dispatch_outcomes_n2, market_totals_n2
+
+
+@app.cell
+def _(dispatch_outcomes_n2, market_totals_n2, render_market_outcomes_block):
+    render_market_outcomes_block(
+        dispatch_outcomes_n2,
+        market_totals_n2,
+        heading="N2 Dispatch Outcomes",
+        notes_md=(
+            "Demand share uses **total N2 demand energy** over the full horizon. "
+            "Gross margin is **revenue minus variable cost** for generator dispatch."
+        ),
+    )
+    return
+
+
+@app.cell
 def _(mo):
     mo.md("""
     ## Step Up: Thu–Sun with Solar, VIC-Calibrated Demand (Pre-BESS Era)
@@ -476,7 +582,7 @@ def _(build_dispatch_price_figure, dispatch_order3, export_figure, n3):
         legend_loc="upper center",
         legend_bbox=(0.5, 1.2),
         figure_legend=False,
-        figsize=(16, 4),
+        figsize=(18, 4.8),
     )
     export_figure(dispatch_fig3)
     dispatch_fig3
@@ -493,7 +599,7 @@ def _(build_dispatch_price_figure, export_figure, n3):
         price_plot_style="line",
         title=None,
         price_title="Thu–Sun Shadow Price — VIC Solar Penetration, Pre-BESS (10-min)",
-        figsize=(16, 3),
+        figsize=(18, 3.6),
     )
     export_figure(price_fig3)
     price_fig3
@@ -661,7 +767,7 @@ def _(build_dispatch_price_figure, dispatch_order4, export_figure, n4):
         legend_loc="upper center",
         legend_bbox=(0.5, 1.2),
         figure_legend=False,
-        figsize=(16, 4),
+        figsize=(18, 4.8),
     )
     export_figure(dispatch_fig4, stem="n4_dispatch")
     dispatch_fig4
@@ -900,7 +1006,7 @@ def _(build_dispatch_price_figure, dispatch_order5, export_figure, n5):
         legend_loc="lower center",
         legend_bbox=(0.5, -0.1),
         figure_legend=True,
-        figsize=(16, 9),
+        figsize=(18, 10.5),
         date_tick_interval_hours=6,
     )
     export_figure(dispatch_fig5, stem="n5_dispatch_soc")
@@ -1000,58 +1106,16 @@ def _(
 
 
 @app.cell
-def _(dispatch_outcomes_n5, market_totals_n5, mo):
-    _display = dispatch_outcomes_n5.copy()
-    _pct_cols = ["share_of_total_demand_pct", "average_loading"]
-    _hour_cols = ["active_hours", "charge_hours"]
-    _money_cols = [
-        "realized_sell_price_aud_per_mwh",
-        "gross_revenue_aud",
-        "variable_cost_aud",
-        "charging_cost_aud",
-        "gross_margin_aud",
-        "margin_aud_per_mwh",
-    ]
-    _energy_cols = ["capacity_mw", "dispatched_mwh", "charge_mwh", "average_dispatch_mw"]
-    _display[_pct_cols] = _display[_pct_cols].round(1)
-    _display[_hour_cols] = _display[_hour_cols].round(1)
-    _display[_money_cols] = _display[_money_cols].round(1)
-    _display[_energy_cols] = _display[_energy_cols].round(1)
-    _display = _display[
-        [
-            "asset",
-            "type",
-            "capacity_mw",
-            "dispatched_mwh",
-            "charge_mwh",
-            "share_of_total_demand_pct",
-            "active_hours",
-            "charge_hours",
-            "average_loading",
-            "realized_sell_price_aud_per_mwh",
-            "gross_revenue_aud",
-            "variable_cost_aud",
-            "charging_cost_aud",
-            "gross_margin_aud",
-            "margin_aud_per_mwh",
-        ]
-    ]
-    _totals_display = market_totals_n5.copy()
-    _totals_display["value"] = _totals_display["value"].round(1)
-
-    mo.vstack(
-        [
-            mo.md(
-                """
-                ## N5 Dispatch Outcomes
-
-                Demand share uses **total N5 demand energy** over the full horizon.
-                Realized sell price is **gross revenue / dispatched MWh**.
-                For **BESS**, gross margin equals **discharge revenue minus charging cost**.
-                """
-            ),
-            mo.hstack([_totals_display, _display], widths=[0.28, 0.72]),
-        ]
+def _(dispatch_outcomes_n5, market_totals_n5, render_market_outcomes_block):
+    render_market_outcomes_block(
+        dispatch_outcomes_n5,
+        market_totals_n5,
+        heading="N5 Dispatch Outcomes",
+        notes_md=(
+            "Demand share uses **total N5 demand energy** over the full horizon. "
+            "Realized sell price is **gross revenue / dispatched MWh**. "
+            "For **BESS**, gross margin equals **discharge revenue minus charging cost**."
+        ),
     )
     return
 
@@ -1061,6 +1125,7 @@ def _(build_market_outcomes_dashboard, dispatch_outcomes_n5, export_figure):
     outcomes_fig = build_market_outcomes_dashboard(
         dispatch_outcomes_n5,
         title="N5 Market Outcomes by Asset",
+        figsize=(20, 6.8),
     )
     export_figure(outcomes_fig, stem="n5_outcomes_dashboard")
     outcomes_fig

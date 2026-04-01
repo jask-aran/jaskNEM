@@ -326,8 +326,12 @@ def build_market_outcomes_tables(
     )
     return dispatch_outcomes, market_totals
 
-
-def build_market_outcomes_dashboard(dispatch_outcomes_df: pd.DataFrame, *, title: str | None = None):
+def build_market_outcomes_dashboard(
+    dispatch_outcomes_df: pd.DataFrame,
+    *,
+    title: str | None = None,
+    figsize: tuple[float, float] = (18, 6),
+):
     asset_order = dispatch_outcomes_df["asset"].tolist()
     y = list(range(len(asset_order)))
     bar_colors = [OUTCOME_TYPE_COLORS.get(asset_type, "#7f7f7f") for asset_type in dispatch_outcomes_df["type"]]
@@ -340,7 +344,7 @@ def build_market_outcomes_dashboard(dispatch_outcomes_df: pd.DataFrame, *, title
             return f"${value / 1_000:.1f}k"
         return f"${value:.0f}"
 
-    fig, (margin_ax, share_ax, activity_ax) = plt.subplots(1, 3, figsize=(18, 6), sharey=True)
+    fig, (margin_ax, share_ax, activity_ax) = plt.subplots(1, 3, figsize=figsize, sharey=True)
 
     margin = dispatch_outcomes_df["gross_margin_aud"]
     margin_colors = ["#2f7d32" if value >= 0 else "#c73e1d" for value in margin]
