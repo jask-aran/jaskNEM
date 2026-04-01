@@ -733,5 +733,100 @@ def _(mo):
     return
 
 
+@app.cell
+def _(np, pd, pypsa, thermal_units_n4):
+    _ramp_defaults = {
+        "brown_coal": {"ramp_limit_up": 0.030, "ramp_limit_down": 0.030},
+        "black_coal": {"ramp_limit_up": 0.045, "ramp_limit_down": 0.045},
+        "ccgt":       {"ramp_limit_up": 0.110, "ramp_limit_down": 0.110},
+        "ocgt":       {"ramp_limit_up": 0.250, "ramp_limit_down": 0.250},
+    }
+    _weekday_h = np.array([
+        0.53, 0.52, 0.51, 0.50, 0.50, 0.50,
+        0.50, 0.51, 0.52, 0.54, 0.57, 0.62,
+        0.69, 0.76, 0.83, 0.89, 0.92, 0.93,
+        0.91, 0.88, 0.86, 0.85,
+        0.84, 0.84, 0.84, 0.84, 0.85, 0.86, 0.87, 0.88,
+        0.90, 0.93, 0.96, 1.00, 1.05, 1.13,
+        1.22, 1.28, 1.33, 1.32, 1.28, 1.18,
+        1.04, 0.91, 0.80, 0.71, 0.64, 0.58,
+    ])
+    _weekend_h = np.array([
+        0.52, 0.51, 0.50, 0.49, 0.49, 0.49,
+        0.50, 0.50, 0.51, 0.52, 0.53, 0.55,
+        0.58, 0.61, 0.65, 0.69, 0.73, 0.77,
+        0.80, 0.82, 0.83, 0.83,
+        0.83, 0.83, 0.83, 0.83, 0.84, 0.85, 0.87, 0.90,
+        0.93, 0.97, 1.00, 1.03, 1.05, 1.06,
+        1.06, 1.06, 1.05, 1.02, 0.97, 0.91,
+        0.83, 0.74, 0.66, 0.60, 0.55, 0.52,
+    ])
+
+    def _to_10min(half_hourly):
+        x = np.linspace(0, 48, 144, endpoint=False)
+        return np.interp(x, np.arange(49), np.append(half_hourly, half_hourly[0]))
+
+    def build_n5():
+        n5 = pypsa.Network()
+        n5.set_snapshots(pd.date_range("2024-01-04", periods=576, freq="10min").as_unit("ns"))
+        n5.add("Carrier", "AC")
+        n5.add("Bus", "NEM", carrier="AC")
+        for _carrier in ["solar", "brown_coal", "black_coal", "ccgt", "ocgt", "scarcity", "bess"]:
+            n5.add("Carrier", _carrier)
+
+        _slot = np.arange(576) % 144
+        _solar_pu = np.exp(-0.5 * ((_slot - 72) / 15.0) ** 2)
+        n5.add("Generator", "Solar", bus="NEM", carrier="solar", p_nom=6000, marginal_cost=0.0)
+        n5.generators_t.p_max_pu = pd.DataFrame({"Solar": _solar_pu}, index=n5.snapshots)
+
+        _demand_shape = np.concatenate([
+            _to_10min(_weekday_h) * 1.00,
+            _to_10min(_weekday_h) * 0.97,
+            _to_10min(_weekend_h) * 0.87,
+            _to_10min(_weekend_h) * 0.83,
+        ])
+        _rng = np.random.default_rng(7)
+        _noise = _rng.normal(0.0, 0.008, 576)
+        _demand = (8000 * (_demand_shape + _noise)).clip(min=0)
+        n5.add("Load", "Demand", bus="NEM", p_set=pd.Series(_demand, index=n5.snapshots))
+
+        for _row in thermal_units_n4.itertuples(index=False):
+            _ramp = _ramp_defaults[_row.tech]
+            n5.add(
+                "Generator", _row.unit_name,
+                bus="NEM", carrier=_row.tech,
+                p_nom=_row.p_nom_mw,
+                marginal_cost=_row.marginal_cost,
+                ramp_limit_up=_ramp["ramp_limit_up"],
+                ramp_limit_down=_ramp["ramp_limit_down"],
+            )
+
+        n5.add("Generator", "Scarcity", bus="NEM", carrier="scarcity",
+               p_nom=30000, marginal_cost=15500.0)
+
+        n5.add(
+            "StorageUnit", "BESS",
+            bus="NEM",
+            carrier="bess",
+            p_nom=600.0,
+            max_hours=2.0,
+            efficiency_store=0.92,
+            efficiency_dispatch=0.92,
+            state_of_charge_initial=0.5,
+            cyclic_state_of_charge=False,
+            marginal_cost=0.0,
+        )
+
+        _dispatch_order = pd.Index(
+            ["Solar"] + thermal_units_n4["unit_name"].tolist() + ["Scarcity"],
+            name="generator",
+        )
+        _status, _condition = n5.optimize(solver_name="highs")
+        return n5, _dispatch_order, _status, _condition
+
+    n5, dispatch_order5, status5, condition5 = build_n5()
+    return condition5, dispatch_order5, n5, status5
+
+
 if __name__ == "__main__":
     app.run()
