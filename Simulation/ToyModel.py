@@ -341,10 +341,394 @@ def _(condition2, dispatch_order2, mo, n2, output_dir, pd, status2):
 @app.cell
 def _(mo):
     mo.md("""
-    ## Live-Reload Check
+    ## Step Up: Thu–Sun with Solar, VIC-Calibrated Demand (Pre-BESS Era)
 
-    If this cell does not appear without restarting `marimo run --watch`,
-    the file watcher is likely not picking up notebook changes reliably.
+    Four-day window (Thursday–Sunday) at 10-minute resolution using
+    separate VIC-calibrated weekday and weekend demand shapes. Solar is
+    6 000 MW with a Gaussian diurnal profile (σ = 2.5 h).
+
+    This approximates Victoria circa 2018–2020: significant solar
+    penetration, no grid-scale storage. Expected pricing regimes:
+
+    - **Thu/Fri midday** — $25 (brown coal marginal, solar suppresses black coal)
+    - **Sat/Sun midday** — $0 (solar exceeds weekend demand, curtailment)
+    - **Thu evening** — $180 (OCGT forced by high weekday peak)
+    - **Fri evening** — $85 (CCGT marginal, slightly lower demand)
+    - **Sat/Sun evening** — $40 (black coal, modest weekend peak)
+    """)
+    return
+
+
+@app.cell
+def _(np, pd, pypsa):
+    n3 = pypsa.Network()
+    n3.set_snapshots(pd.date_range("2024-01-04", periods=576, freq="10min").as_unit("ns"))
+    n3.add("Carrier", "AC")
+    n3.add("Bus", "NEM", carrier="AC")
+
+    n3.add("Generator", "Brown Coal", bus="NEM", p_nom=3000, marginal_cost=25)
+    n3.add("Generator", "Black Coal", bus="NEM", p_nom=5000, marginal_cost=40)
+    n3.add("Generator", "CCGT Gas",   bus="NEM", p_nom=2000, marginal_cost=85)
+    n3.add("Generator", "OCGT Gas",   bus="NEM", p_nom=800,  marginal_cost=180)
+    n3.add("Generator", "Solar",      bus="NEM", p_nom=6000, marginal_cost=0)
+
+    # Gaussian solar: σ = 2.5 h = 15 × 10-min slots, noon = slot 72
+    _slot_of_day = np.arange(576) % 144
+    _solar_pu3 = np.exp(-0.5 * ((_slot_of_day - 72) / 15.0) ** 2)
+    n3.generators_t.p_max_pu = pd.DataFrame({"Solar": _solar_pu3}, index=n3.snapshots)
+
+    # VIC-calibrated half-hourly shapes (48 values), linearly interpolated to 10-min
+    # Each 10-min slot maps to 1/3 of a half-hour interval
+    def _to_10min(half_hourly):
+        x = np.linspace(0, 48, 144, endpoint=False)
+        return np.interp(x, np.arange(49), np.append(half_hourly, half_hourly[0]))
+
+    _weekday_h = np.array([
+        # 00:00–02:30 — overnight minimum (~4 000 MW)
+        0.53, 0.52, 0.51, 0.50, 0.50, 0.50,
+        # 03:00–05:30 — pre-dawn, slow rise
+        0.50, 0.51, 0.52, 0.54, 0.57, 0.62,
+        # 06:00–08:30 — morning ramp to peak (~7 400 MW)
+        0.69, 0.76, 0.83, 0.89, 0.92, 0.93,
+        # 09:00–10:30 — post-morning sag
+        0.91, 0.88, 0.86, 0.85,
+        # 11:00–14:30 — flat midday low (solar holds price at $25)
+        0.84, 0.84, 0.84, 0.84, 0.85, 0.86, 0.87, 0.88,
+        # 15:00–17:30 — afternoon build into evening
+        0.90, 0.93, 0.96, 1.00, 1.05, 1.13,
+        # 18:00–20:30 — broad evening peak plateau (OCGT zone above 1.25)
+        1.22, 1.28, 1.33, 1.32, 1.28, 1.18,
+        # 21:00–23:30 — post-peak decline
+        1.04, 0.91, 0.80, 0.71, 0.64, 0.58,
+    ])
+    _weekend_h = np.array([
+        # 00:00–02:30 — overnight minimum (~3 900 MW with Sat scalar)
+        0.52, 0.51, 0.50, 0.49, 0.49, 0.49,
+        # 03:00–05:30 — pre-dawn
+        0.50, 0.50, 0.51, 0.52, 0.53, 0.55,
+        # 06:00–08:30 — slow morning rise (sleeping in, no sharp peak)
+        0.58, 0.61, 0.65, 0.69, 0.73, 0.77,
+        # 09:00–10:30 — gentle rise toward midday
+        0.80, 0.82, 0.83, 0.83,
+        # 11:00–14:30 — flat midday plateau (solar curtailment zone)
+        0.83, 0.83, 0.83, 0.83, 0.84, 0.85, 0.87, 0.90,
+        # 15:00–17:30 — afternoon build (later than weekday)
+        0.93, 0.97, 1.00, 1.03, 1.05, 1.06,
+        # 18:00–20:30 — modest evening plateau (~7 400 MW, black coal marginal)
+        1.06, 1.06, 1.05, 1.02, 0.97, 0.91,
+        # 21:00–23:30 — post-peak decline
+        0.83, 0.74, 0.66, 0.60, 0.55, 0.52,
+    ])
+
+    # Thu ×1.00, Fri ×0.97, Sat ×0.87, Sun ×0.83
+    _demand_shape = np.concatenate([
+        _to_10min(_weekday_h) * 1.00,
+        _to_10min(_weekday_h) * 0.97,
+        _to_10min(_weekend_h) * 0.87,
+        _to_10min(_weekend_h) * 0.83,
+    ])
+    _rng3 = np.random.default_rng(7)
+    _noise3 = _rng3.normal(0.0, 0.008, 576)
+    _demand3 = (8000 * (_demand_shape + _noise3)).clip(min=0)
+    n3.add("Load", "Demand", bus="NEM", p_set=pd.Series(_demand3, index=n3.snapshots))
+
+    dispatch_order3 = pd.Index(
+        ["Solar", "Brown Coal", "Black Coal", "CCGT Gas", "OCGT Gas"],
+        name="generator",
+    )
+
+    status3, condition3 = n3.optimize(solver_name="highs")
+    return condition3, dispatch_order3, n3, status3
+
+
+@app.cell
+def _(dispatch_order3, export_figure, n3, plt):
+    dispatch_fig3, dispatch_ax3 = plt.subplots(figsize=(16, 4))
+    n3.generators_t.p[dispatch_order3].plot.area(ax=dispatch_ax3, linewidth=0)
+    dispatch_ax3.set_title("Thu–Sun Dispatch — VIC Solar Penetration, Pre-BESS (10-min)")
+    dispatch_ax3.set_xlabel("Snapshot")
+    dispatch_ax3.set_ylabel("Dispatch (MW)")
+    dispatch_ax3.legend(title="Generator", ncols=5, loc="upper center", bbox_to_anchor=(0.5, 1.2))
+    dispatch_ax3.grid(axis="y", alpha=0.2)
+    export_figure(dispatch_fig3)
+    dispatch_ax3
+    return
+
+
+@app.cell
+def _(export_figure, n3, plt):
+    price_fig3, price_ax3 = plt.subplots(figsize=(16, 3))
+    n3.buses_t.marginal_price["NEM"].plot(ax=price_ax3, color="#2e8b57", linewidth=1.5)
+    price_ax3.set_title("Thu–Sun Shadow Price — VIC Solar Penetration, Pre-BESS (10-min)")
+    price_ax3.set_xlabel("Snapshot")
+    price_ax3.set_ylabel("Price ($/MWh)")
+    price_ax3.grid(axis="y", alpha=0.2)
+    export_figure(price_fig3)
+    price_ax3
+    return
+
+
+@app.cell
+def _(condition3, dispatch_order3, mo, n3, output_dir, pd, status3):
+    _results3 = pd.concat(
+        [
+            n3.loads_t.p[["Demand"]].rename(columns={"Demand": "demand_mw"}),
+            n3.buses_t.marginal_price[["NEM"]].rename(columns={"NEM": "shadow_price_per_mwh"}),
+            n3.generators_t.p[dispatch_order3].rename(
+                columns=lambda name: f"{name.lower().replace(' ', '_')}_mw"
+            ),
+        ],
+        axis=1,
+    )
+    _results3.to_csv(output_dir / "results_solar.csv")
+
+    mo.md(f"**Solve status:** `{status3}` — **Termination condition:** `{condition3}`")
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md("""
+    ## N4: Multi-Unit Thermal Stack + Ramp Constraints + Optional Unit Commitment
+
+    Direct extension of `n3` with the same 4-day, 10-minute horizon, demand, and solar:
+    - thermal fleet split into 8 separate units with differentiated costs
+    - class-based thermal ramp-rate limits
+    - optional unit commitment for coal and gas (`uc_on=True`)
+    """)
+    return
+
+
+@app.cell
+def _(np, pd, pypsa):
+    thermal_units_n4 = pd.DataFrame(
+        [
+            {"unit_name": "Brown Coal A", "tech": "brown_coal", "p_nom_mw": 1400, "marginal_cost": 23.0},
+            {"unit_name": "Brown Coal B", "tech": "brown_coal", "p_nom_mw": 1000, "marginal_cost": 26.0},
+            {"unit_name": "Brown Coal C", "tech": "brown_coal", "p_nom_mw": 600, "marginal_cost": 29.0},
+            {"unit_name": "Black Coal A", "tech": "black_coal", "p_nom_mw": 2800, "marginal_cost": 38.0},
+            {"unit_name": "Black Coal B", "tech": "black_coal", "p_nom_mw": 2200, "marginal_cost": 44.0},
+            {"unit_name": "CCGT A", "tech": "ccgt", "p_nom_mw": 1200, "marginal_cost": 82.0},
+            {"unit_name": "CCGT B", "tech": "ccgt", "p_nom_mw": 800, "marginal_cost": 90.0},
+            {"unit_name": "OCGT A", "tech": "ocgt", "p_nom_mw": 800, "marginal_cost": 185.0},
+        ]
+    )
+
+    ramp_defaults_n4 = {
+        "brown_coal": {"ramp_limit_up": 0.030, "ramp_limit_down": 0.030},
+        "black_coal": {"ramp_limit_up": 0.045, "ramp_limit_down": 0.045},
+        "ccgt": {"ramp_limit_up": 0.110, "ramp_limit_down": 0.110},
+        "ocgt": {"ramp_limit_up": 0.250, "ramp_limit_down": 0.250},
+    }
+
+    def _to_10min(half_hourly):
+        x = np.linspace(0, 48, 144, endpoint=False)
+        return np.interp(x, np.arange(49), np.append(half_hourly, half_hourly[0]))
+
+    weekday_h = np.array(
+        [
+            0.53, 0.52, 0.51, 0.50, 0.50, 0.50,
+            0.50, 0.51, 0.52, 0.54, 0.57, 0.62,
+            0.69, 0.76, 0.83, 0.89, 0.92, 0.93,
+            0.91, 0.88, 0.86, 0.85,
+            0.84, 0.84, 0.84, 0.84, 0.85, 0.86, 0.87, 0.88,
+            0.90, 0.93, 0.96, 1.00, 1.05, 1.13,
+            1.22, 1.28, 1.33, 1.32, 1.28, 1.18,
+            1.04, 0.91, 0.80, 0.71, 0.64, 0.58,
+        ]
+    )
+    weekend_h = np.array(
+        [
+            0.52, 0.51, 0.50, 0.49, 0.49, 0.49,
+            0.50, 0.50, 0.51, 0.52, 0.53, 0.55,
+            0.58, 0.61, 0.65, 0.69, 0.73, 0.77,
+            0.80, 0.82, 0.83, 0.83,
+            0.83, 0.83, 0.83, 0.83, 0.84, 0.85, 0.87, 0.90,
+            0.93, 0.97, 1.00, 1.03, 1.05, 1.06,
+            1.06, 1.06, 1.05, 1.02, 0.97, 0.91,
+            0.83, 0.74, 0.66, 0.60, 0.55, 0.52,
+        ]
+    )
+
+    def build_n4():
+        n4 = pypsa.Network()
+        n4.set_snapshots(pd.date_range("2024-01-04", periods=576, freq="10min").as_unit("ns"))
+        n4.add("Carrier", "AC")
+        n4.add("Bus", "NEM", carrier="AC")
+        for _carrier in ["solar", "brown_coal", "black_coal", "ccgt", "ocgt", "scarcity"]:
+            n4.add("Carrier", _carrier)
+
+        slot_of_day = np.arange(576) % 144
+        solar_pu = np.exp(-0.5 * ((slot_of_day - 72) / 15.0) ** 2)
+        n4.add("Generator", "Solar", bus="NEM", carrier="solar", p_nom=6000, marginal_cost=0.0)
+        n4.generators_t.p_max_pu = pd.DataFrame({"Solar": solar_pu}, index=n4.snapshots)
+
+        demand_shape = np.concatenate(
+            [
+                _to_10min(weekday_h) * 1.00,
+                _to_10min(weekday_h) * 0.97,
+                _to_10min(weekend_h) * 0.87,
+                _to_10min(weekend_h) * 0.83,
+            ]
+        )
+        rng = np.random.default_rng(7)
+        noise = rng.normal(0.0, 0.008, 576)
+        demand = (8000 * (demand_shape + noise)).clip(min=0)
+        n4.add("Load", "Demand", bus="NEM", p_set=pd.Series(demand, index=n4.snapshots))
+
+        for row in thermal_units_n4.itertuples(index=False):
+            ramp_cfg = ramp_defaults_n4[row.tech]
+            n4.add(
+                "Generator",
+                row.unit_name,
+                bus="NEM",
+                carrier=row.tech,
+                p_nom=row.p_nom_mw,
+                marginal_cost=row.marginal_cost,
+                ramp_limit_up=ramp_cfg["ramp_limit_up"],
+                ramp_limit_down=ramp_cfg["ramp_limit_down"],
+            )
+
+        n4.add(
+            "Generator",
+            "Scarcity",
+            bus="NEM",
+            carrier="scarcity",
+            p_nom=30000,
+            marginal_cost=15500.0,
+        )
+
+        dispatch_order = pd.Index(
+            ["Solar"] + thermal_units_n4["unit_name"].tolist() + ["Scarcity"],
+            name="generator",
+        )
+
+        status, condition = n4.optimize(solver_name="highs")
+        return n4, dispatch_order, status, condition
+
+    n4, dispatch_order4, status4, condition4 = build_n4()
+    return condition4, dispatch_order4, n4, status4, thermal_units_n4
+
+
+@app.cell
+def _(condition4, mo, status4):
+    mo.md(f"**N4 solve status:** `{status4}` — **Termination:** `{condition4}`")
+    return
+
+
+@app.cell
+def _(dispatch_order4, export_figure, n4, plt):
+    dispatch_fig4, dispatch_ax4 = plt.subplots(figsize=(16, 4))
+    n4.generators_t.p[dispatch_order4].clip(lower=0.0).plot.area(ax=dispatch_ax4, linewidth=0)
+    dispatch_ax4.set_title("N4 Unit Dispatch — Multi-Unit Thermal with Ramp Constraints")
+    dispatch_ax4.set_xlabel("Snapshot")
+    dispatch_ax4.set_ylabel("Dispatch (MW)")
+    dispatch_ax4.legend(title="Generator", ncols=3, loc="upper center", bbox_to_anchor=(0.5, 1.2))
+    dispatch_ax4.grid(axis="y", alpha=0.2)
+    export_figure(dispatch_fig4, stem="n4_dispatch")
+    dispatch_ax4
+    return
+
+
+@app.cell
+def _(export_figure, n4, plt):
+    price_fig4, (price_ax4_full, price_ax4_zoom) = plt.subplots(1, 2, figsize=(16, 4))
+
+    n4.buses_t.marginal_price["NEM"].plot(ax=price_ax4_full, color="#b22222", linewidth=1.5)
+    price_ax4_full.set_title("N4 Shadow Price — Full")
+    price_ax4_full.set_xlabel("Snapshot")
+    price_ax4_full.set_ylabel("Price ($/MWh)")
+    price_ax4_full.grid(axis="y", alpha=0.2)
+
+    n4.buses_t.marginal_price["NEM"].plot(ax=price_ax4_zoom, color="#b22222", linewidth=1.5)
+    price_ax4_zoom.set_title("N4 Shadow Price — Zoom [-250, 250]")
+    price_ax4_zoom.set_xlabel("Snapshot")
+    price_ax4_zoom.set_ylabel("Price ($/MWh)")
+    price_ax4_zoom.set_ylim(-250, 250)
+    price_ax4_zoom.grid(axis="y", alpha=0.2)
+
+    price_fig4.tight_layout()
+    export_figure(price_fig4, stem="n4_price")
+    price_ax4_zoom
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md("""
+    ### N4 Diagnostics
+
+    - **Solar curtailment is expected** in this single-bus setup because thermal ramp-down limits can bind while demand falls; with no export path and no storage sink, some solar must be curtailed.
+    - The **+15500 then negative spike** around midnight on **2024-01-06** is an intertemporal ramp shadow-price effect from adjacent-period constraints, not because solar lacks ramp speed.
+    - Unit commitment (MILP) was removed: the 8-unit × 576-snapshot MILP did not converge in reasonable time, and dual-based prices from MILP are not economically meaningful anyway.
+    """)
+    return
+
+
+@app.cell
+def _(dispatch_order4, n4, output_dir, pd, thermal_units_n4):
+    _results = pd.concat(
+        [
+            n4.loads_t.p[["Demand"]].rename(columns={"Demand": "demand_mw"}),
+            n4.buses_t.marginal_price[["NEM"]].rename(columns={"NEM": "shadow_price_per_mwh"}),
+            n4.generators_t.p[dispatch_order4].rename(
+                columns=lambda name: f"{name.lower().replace(' ', '_')}_mw"
+            ),
+        ],
+        axis=1,
+    )
+    _results.to_csv(output_dir / "results_n4.csv")
+
+    _thermal_units_idx = thermal_units_n4.set_index("unit_name")
+    _unit_summary = _thermal_units_idx[["tech", "p_nom_mw", "marginal_cost"]].rename(
+        columns={"p_nom_mw": "capacity_mw", "marginal_cost": "marginal_cost_per_mwh"}
+    )
+    _unit_summary["dispatched_mwh"] = n4.generators_t.p[_thermal_units_idx.index].sum()
+    _unit_summary["average_dispatch_mw"] = n4.generators_t.p[_thermal_units_idx.index].mean()
+    _unit_summary["average_loading"] = (
+        _unit_summary["average_dispatch_mw"] / _unit_summary["capacity_mw"]
+    ).round(3)
+    _unit_summary["on_hours"] = (n4.generators_t.p[_thermal_units_idx.index] > 0).sum() * (10.0 / 60.0)
+    _unit_summary = _unit_summary.reset_index(names="unit")
+    _unit_summary.to_csv(output_dir / "unit_summary_n4.csv", index=False)
+
+    _system_summary = pd.DataFrame(
+        {
+            "metric": [
+                "Average demand (MW)",
+                "Average shadow price ($/MWh)",
+                "Peak shadow price ($/MWh)",
+                "Thermal on-hours (sum)",
+            ],
+            "value": [
+                _results["demand_mw"].mean(),
+                _results["shadow_price_per_mwh"].mean(),
+                _results["shadow_price_per_mwh"].max(),
+                _unit_summary["on_hours"].sum(),
+            ],
+        }
+    )
+    _system_summary.to_csv(output_dir / "system_summary_n4.csv", index=False)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md("""
+    ## N5: Multi-Unit Thermal Stack + Ramp Constraints + BESS
+
+    Direct extension of N4 with the same 4-day, 10-minute horizon, demand, solar,
+    and 8-unit thermal fleet. Adds a single aggregate BESS representing the
+    VIC grid-scale fleet:
+
+    - **600 MW / 1,200 MWh** (2-hour duration)
+    - **84.6 % round-trip efficiency** (92 % store × 92 % dispatch)
+    - **50 % initial SOC** (600 MWh at Thursday 00:00)
+    - LP dispatch: optimizer charges during cheap/negative-price periods and
+      discharges during scarcity peaks
+
+    Expected effects vs N4: reduced negative midday price depth, fewer
+    $15,500/MWh scarcity events, coal displacement during evening peaks.
     """)
     return
 
