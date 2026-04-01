@@ -828,5 +828,77 @@ def _(np, pd, pypsa, thermal_units_n4):
     return condition5, dispatch_order5, n5, status5
 
 
+@app.cell
+def _(condition5, mo, status5):
+    mo.md(f"**N5 solve status:** `{status5}` — **Termination:** `{condition5}`")
+    return
+
+
+@app.cell
+def _(dispatch_order5, export_figure, n5, plt):
+    dispatch_fig5, (dispatch_ax5, soc_ax5) = plt.subplots(
+        2, 1, figsize=(16, 7), sharex=True
+    )
+
+    n5.generators_t.p[dispatch_order5].clip(lower=0.0).plot.area(
+        ax=dispatch_ax5, linewidth=0
+    )
+    dispatch_ax5.set_title("N5 Unit Dispatch — Multi-Unit Thermal + BESS (10-min)")
+    dispatch_ax5.set_ylabel("Dispatch (MW)")
+    dispatch_ax5.legend(
+        title="Generator", ncols=3, loc="upper center", bbox_to_anchor=(0.5, 1.2)
+    )
+    dispatch_ax5.grid(axis="y", alpha=0.2)
+
+    _soc = n5.storage_units_t.state_of_charge["BESS"]
+    soc_ax5.plot(_soc.index, _soc.values, color="#1f77b4", linewidth=1.5)
+    soc_ax5.axhline(600, color="grey", linestyle="--", linewidth=0.8, alpha=0.5)
+    soc_ax5.set_title("BESS State of Charge")
+    soc_ax5.set_xlabel("Snapshot")
+    soc_ax5.set_ylabel("SOC (MWh)")
+    soc_ax5.set_ylim(0, 1200)
+    soc_ax5.grid(axis="y", alpha=0.2)
+
+    dispatch_fig5.tight_layout()
+    export_figure(dispatch_fig5, stem="n5_dispatch_soc")
+    dispatch_ax5
+    return
+
+
+@app.cell
+def _(export_figure, n4, n5, plt):
+    price_fig5, (price_ax5_full, price_ax5_zoom) = plt.subplots(1, 2, figsize=(16, 4))
+
+    n4.buses_t.marginal_price["NEM"].plot(
+        ax=price_ax5_full, color="#b22222", linewidth=1.2, label="N4 (no BESS)", alpha=0.8
+    )
+    n5.buses_t.marginal_price["NEM"].plot(
+        ax=price_ax5_full, color="#1f77b4", linewidth=1.2, label="N5 (BESS)", alpha=0.8
+    )
+    price_ax5_full.set_title("N4 vs N5 Shadow Price — Full")
+    price_ax5_full.set_xlabel("Snapshot")
+    price_ax5_full.set_ylabel("Price ($/MWh)")
+    price_ax5_full.legend()
+    price_ax5_full.grid(axis="y", alpha=0.2)
+
+    n4.buses_t.marginal_price["NEM"].plot(
+        ax=price_ax5_zoom, color="#b22222", linewidth=1.2, label="N4", alpha=0.8
+    )
+    n5.buses_t.marginal_price["NEM"].plot(
+        ax=price_ax5_zoom, color="#1f77b4", linewidth=1.2, label="N5", alpha=0.8
+    )
+    price_ax5_zoom.set_title("N4 vs N5 Shadow Price — Zoom [−250, 250]")
+    price_ax5_zoom.set_xlabel("Snapshot")
+    price_ax5_zoom.set_ylabel("Price ($/MWh)")
+    price_ax5_zoom.set_ylim(-250, 250)
+    price_ax5_zoom.legend()
+    price_ax5_zoom.grid(axis="y", alpha=0.2)
+
+    price_fig5.tight_layout()
+    export_figure(price_fig5, stem="n5_price_compare")
+    price_ax5_zoom
+    return
+
+
 if __name__ == "__main__":
     app.run()
