@@ -785,7 +785,7 @@ def _(np, pd, pypsa, thermal_units_n4):
             _to_10min(_weekend_h) * 0.87,
             _to_10min(_weekend_h) * 0.83,
         ])
-        _rng = np.random.default_rng(7)
+        _rng = np.random.default_rng(7)  # same seed as N4 for controlled comparison
         _noise = _rng.normal(0.0, 0.008, 576)
         _demand = (8000 * (_demand_shape + _noise)).clip(min=0)
         n5.add("Load", "Demand", bus="NEM", p_set=pd.Series(_demand, index=n5.snapshots))
