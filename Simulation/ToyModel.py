@@ -942,11 +942,11 @@ def _(dispatch_order5, n4, n5, output_dir, pd, thermal_units_n4):
     # --- displacement_n5.csv ---
     _dispatched_n4 = (n4.generators_t.p[_thermal_idx.index] * _dt).sum()
     _dispatched_n5 = (n5.generators_t.p[_thermal_idx.index] * _dt).sum()
-    _displacement = pd.DataFrame({
-        "unit": _thermal_idx.index,
-        "dispatched_mwh_n4": _dispatched_n4.values,
-        "dispatched_mwh_n5": _dispatched_n5.values,
-    })
+    _displacement = (
+        pd.DataFrame({"dispatched_mwh_n4": _dispatched_n4, "dispatched_mwh_n5": _dispatched_n5})
+        .rename_axis("unit")
+        .reset_index()
+    )
     _displacement["delta_mwh"] = (
         _displacement["dispatched_mwh_n5"] - _displacement["dispatched_mwh_n4"]
     )
