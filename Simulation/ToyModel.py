@@ -900,5 +900,77 @@ def _(export_figure, n4, n5, plt):
     return
 
 
+@app.cell
+def _(dispatch_order5, n4, n5, output_dir, pd, thermal_units_n4):
+    _dt = 10.0 / 60.0  # hours per 10-min snapshot
+
+    # --- results_n5.csv ---
+    _charge = n5.storage_units_t.p_store["BESS"]
+    _discharge = n5.storage_units_t.p_dispatch["BESS"]
+    _soc = n5.storage_units_t.state_of_charge["BESS"]
+    _results = pd.concat(
+        [
+            n5.loads_t.p[["Demand"]].rename(columns={"Demand": "demand_mw"}),
+            n5.buses_t.marginal_price[["NEM"]].rename(columns={"NEM": "shadow_price_per_mwh"}),
+            n5.generators_t.p[dispatch_order5].rename(
+                columns=lambda name: f"{name.lower().replace(' ', '_')}_mw"
+            ),
+            _charge.rename("bess_charge_mw"),
+            _discharge.rename("bess_discharge_mw"),
+            _soc.rename("bess_soc_mwh"),
+        ],
+        axis=1,
+    )
+    _results.to_csv(output_dir / "results_n5.csv")
+
+    # --- unit_summary_n5.csv ---
+    _thermal_idx = thermal_units_n4.set_index("unit_name")
+    _unit_summary = _thermal_idx[["tech", "p_nom_mw", "marginal_cost"]].rename(
+        columns={"p_nom_mw": "capacity_mw", "marginal_cost": "marginal_cost_per_mwh"}
+    )
+    _unit_summary["dispatched_mwh"] = (n5.generators_t.p[_thermal_idx.index] * _dt).sum()
+    _unit_summary["average_dispatch_mw"] = n5.generators_t.p[_thermal_idx.index].mean()
+    _unit_summary["average_loading"] = (
+        _unit_summary["average_dispatch_mw"] / _unit_summary["capacity_mw"]
+    ).round(3)
+    _unit_summary["on_hours"] = (
+        (n5.generators_t.p[_thermal_idx.index] > 0).sum() * _dt
+    )
+    _unit_summary = _unit_summary.reset_index(names="unit")
+    _unit_summary.to_csv(output_dir / "unit_summary_n5.csv", index=False)
+
+    # --- displacement_n5.csv ---
+    _dispatched_n4 = (n4.generators_t.p[_thermal_idx.index] * _dt).sum()
+    _dispatched_n5 = (n5.generators_t.p[_thermal_idx.index] * _dt).sum()
+    _displacement = pd.DataFrame({
+        "unit": _thermal_idx.index,
+        "dispatched_mwh_n4": _dispatched_n4.values,
+        "dispatched_mwh_n5": _dispatched_n5.values,
+    })
+    _displacement["delta_mwh"] = (
+        _displacement["dispatched_mwh_n5"] - _displacement["dispatched_mwh_n4"]
+    )
+    _displacement["pct_change"] = (
+        _displacement["delta_mwh"] / _displacement["dispatched_mwh_n4"] * 100
+    ).round(1)
+    _displacement.to_csv(output_dir / "displacement_n5.csv", index=False)
+
+    # --- bess_economics_n5.csv ---
+    _total_charged = (_charge * _dt).sum()
+    _total_discharged = (_discharge * _dt).sum()
+    _rt_eff = _total_discharged / _total_charged if _total_charged > 0 else 0.0
+    _price = n5.buses_t.marginal_price["NEM"]
+    _arb_value = (
+        (_discharge * _price * _dt).sum() - (_charge * _price * _dt).sum()
+    )
+    pd.DataFrame([{
+        "total_charged_mwh": round(_total_charged, 1),
+        "total_discharged_mwh": round(_total_discharged, 1),
+        "rt_efficiency_realised": round(_rt_eff, 4),
+        "arbitrage_value_aud": round(_arb_value, 0),
+    }]).to_csv(output_dir / "bess_economics_n5.csv", index=False)
+    return
+
+
 if __name__ == "__main__":
     app.run()
