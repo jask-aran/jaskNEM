@@ -17,6 +17,9 @@ Use `nb` in local file mode only. Do not use the built-in Read/Write tools for `
 (Obtained via https://github.com/jupyter-ai-contrib/nb-cli)
 
 
+## Working with PyPSA
+Use the DeepWiki MCP to query the PyPSA github repo to understand implemenation. https://deepwiki.com/PyPSA/PyPSA
+
 
 ## Project Structure & Module Organization
 
