@@ -9,6 +9,7 @@ def _():
     import os
     from pathlib import Path
     import sys
+    import importlib
     import numpy as np
     import marimo as mo
     from pathlib import Path
@@ -18,11 +19,13 @@ def _():
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
 
-    from Simulation.pypsa_viz import (
-        build_dispatch_price_figure,
-        build_market_outcomes_dashboard,
-        build_market_outcomes_tables,
-    )
+    import Simulation.pypsa_viz as pypsa_viz
+
+    pypsa_viz = importlib.reload(pypsa_viz)
+    build_dispatch_price_figure = pypsa_viz.build_dispatch_price_figure
+    build_market_outcomes_dashboard = pypsa_viz.build_market_outcomes_dashboard
+    build_market_outcomes_tables = pypsa_viz.build_market_outcomes_tables
+    build_scenario_kpi_summary = pypsa_viz.build_scenario_kpi_summary
 
     mplconfigdir = Path(__file__).resolve().parent / ".mplconfig"
     mplconfigdir.mkdir(parents=True, exist_ok=True)
@@ -98,12 +101,12 @@ def _():
         build_dispatch_price_figure,
         build_market_outcomes_dashboard,
         build_market_outcomes_tables,
+        build_scenario_kpi_summary,
         export_figure,
         mo,
         np,
         output_dir,
         pd,
-        plt,
         pypsa,
         render_market_outcomes_block,
     )
@@ -158,34 +161,28 @@ def _(np, pd, pypsa):
 
 
 @app.cell
-def _(dispatch_order, export_figure, n, plt):
-    dispatch_fig, dispatch_ax = plt.subplots(figsize=(10, 4))
-    n.generators_t.p[dispatch_order].plot.area(ax=dispatch_ax, linewidth=0)
-    dispatch_ax.set_title("Toy Model Dispatch by Generator")
-    dispatch_ax.set_xlabel("Snapshot")
-    dispatch_ax.set_ylabel("Dispatch (MW)")
-    dispatch_ax.legend(title="Generator", ncols=4, loc="upper center", bbox_to_anchor=(0.5, 1.2))
-    dispatch_ax.grid(axis="y", alpha=0.2)
-    export_figure(dispatch_fig)
-    dispatch_ax
+def _(build_dispatch_price_figure, dispatch_order, export_figure, n):
+    dispatch_price_fig = build_dispatch_price_figure(
+        n,
+        dispatch_order=dispatch_order,
+        panels=("dispatch", "price"),
+        dispatch_title="Toy Model Dispatch by Generator",
+        price_title="Toy Model Shadow Price",
+        price_color="#d2691e",
+        legend_title="Generator",
+        legend_ncols=4,
+        legend_loc="upper center",
+        legend_bbox=(0.5, 1.2),
+        figure_legend=False,
+        figsize=(12, 6.8),
+    )
+    export_figure(dispatch_price_fig, stem="n1_dispatch_price")
+    dispatch_price_fig
     return
 
 
 @app.cell
-def _(export_figure, n, plt):
-    price_fig, price_ax = plt.subplots(figsize=(10, 3))
-    n.buses_t.marginal_price["NEM"].plot(ax=price_ax, color="#d2691e", linewidth=2)
-    price_ax.set_title("Toy Model Shadow Price")
-    price_ax.set_xlabel("Snapshot")
-    price_ax.set_ylabel("Price ($/MWh)")
-    price_ax.grid(axis="y", alpha=0.2)
-    export_figure(price_fig)
-    price_ax
-    return
-
-
-@app.cell
-def _(condition, dispatch_order, mo, n, output_dir, pd, status):
+def _(dispatch_order, n, output_dir, pd):
     _results = pd.concat(
         [
             n.loads_t.p[["Demand"]].rename(columns={"Demand": "demand_mw"}),
@@ -229,27 +226,6 @@ def _(condition, dispatch_order, mo, n, output_dir, pd, status):
     _results.to_csv(output_dir / "results.csv")
     _generator_summary.to_csv(output_dir / "generator_summary.csv", index=False)
     _system_summary.to_csv(output_dir / "system_summary.csv", index=False)
-
-    mo.vstack(
-        [
-            mo.md(
-                f"""
-                **Solve status:** `{status}`
-
-                **Termination condition:** `{condition}`
-                """
-            ),
-            mo.md(
-                """
-                The merit-order stack remains the core logic, but demand now
-                follows a stylized hourly profile with small random variation.
-                This creates realistic intraday shifts in marginal unit and price.
-                """
-            ),
-            mo.hstack([_system_summary, _generator_summary], widths="equal"),
-            _results,
-        ]
-    )
     return
 
 
@@ -264,6 +240,20 @@ def _(build_market_outcomes_tables, dispatch_order, n, output_dir):
     dispatch_outcomes_n1.to_csv(output_dir / "dispatch_outcomes_n1.csv", index=False)
     market_totals_n1.to_csv(output_dir / "market_totals_n1.csv", index=False)
     return dispatch_outcomes_n1, market_totals_n1
+
+
+@app.cell
+def _(build_scenario_kpi_summary, condition, market_totals_n1, n, status):
+    build_scenario_kpi_summary(
+        status=status,
+        condition=condition,
+        demand_series=n.loads_t.p["Demand"],
+        market_totals=market_totals_n1,
+        extra_metrics=[
+            ("Total generator supply (MWh)", market_totals_n1.set_index("metric").at["Total generator supply (MWh)", "value"]),
+        ],
+    )
+    return
 
 
 @app.cell
@@ -342,34 +332,29 @@ def _(np, pd, pypsa):
 
 
 @app.cell
-def _(dispatch_order2, export_figure, n2, plt):
-    dispatch_fig2, dispatch_ax2 = plt.subplots(figsize=(16, 4))
-    n2.generators_t.p[dispatch_order2].plot.area(ax=dispatch_ax2, linewidth=0)
-    dispatch_ax2.set_title("Weekly Dispatch with Black Coal Maintenance (30-min)")
-    dispatch_ax2.set_xlabel("Snapshot")
-    dispatch_ax2.set_ylabel("Dispatch (MW)")
-    dispatch_ax2.legend(title="Generator", ncols=4, loc="upper center", bbox_to_anchor=(0.5, 1.2))
-    dispatch_ax2.grid(axis="y", alpha=0.2)
-    export_figure(dispatch_fig2)
-    dispatch_ax2
+def _(build_dispatch_price_figure, dispatch_order2, export_figure, n2):
+    dispatch_price_fig2 = build_dispatch_price_figure(
+        n2,
+        dispatch_order=dispatch_order2,
+        panels=("dispatch", "price"),
+        dispatch_title="Weekly Dispatch with Black Coal Maintenance (30-min)",
+        price_title="Weekly Shadow Price with Maintenance (30-min)",
+        price_color="#b22222",
+        legend_title="Generator",
+        legend_ncols=4,
+        legend_loc="upper center",
+        legend_bbox=(0.5, 1.2),
+        figure_legend=False,
+        figsize=(16, 7.0),
+        date_tick_interval_hours=12,
+    )
+    export_figure(dispatch_price_fig2, stem="n2_dispatch_price")
+    dispatch_price_fig2
     return
 
 
 @app.cell
-def _(export_figure, n2, plt):
-    price_fig2, price_ax2 = plt.subplots(figsize=(16, 3))
-    n2.buses_t.marginal_price["NEM"].plot(ax=price_ax2, color="#b22222", linewidth=2)
-    price_ax2.set_title("Weekly Shadow Price with Maintenance (30-min)")
-    price_ax2.set_xlabel("Snapshot")
-    price_ax2.set_ylabel("Price ($/MWh)")
-    price_ax2.grid(axis="y", alpha=0.2)
-    export_figure(price_fig2)
-    price_ax2
-    return
-
-
-@app.cell
-def _(condition2, dispatch_order2, mo, n2, output_dir, pd, status2):
+def _(dispatch_order2, n2, output_dir, pd):
     results2 = pd.concat(
         [
             n2.loads_t.p[["Demand"]].rename(columns={"Demand": "demand_mw"}),
@@ -414,28 +399,6 @@ def _(condition2, dispatch_order2, mo, n2, output_dir, pd, status2):
     results2.to_csv(output_dir / "results_multiday.csv")
     generator_summary2.to_csv(output_dir / "generator_summary_multiday.csv", index=False)
     system_summary2.to_csv(output_dir / "system_summary_multiday.csv", index=False)
-
-    mo.vstack(
-        [
-            mo.md(
-                f"""
-                **Solve status:** `{status2}`
-
-                **Termination condition:** `{condition2}`
-                """
-            ),
-            mo.md(
-                """
-                The black coal derating on day 2 pushes more daytime hours into
-                the gas stack while preserving a feasible evening peak. This
-                shows how maintenance shifts dispatch and prices even when the
-                demand shape itself remains familiar.
-                """
-            ),
-            mo.hstack([system_summary2, generator_summary2], widths="equal"),
-            results2,
-        ]
-    )
     return
 
 
@@ -450,6 +413,20 @@ def _(build_market_outcomes_tables, dispatch_order2, n2, output_dir):
     dispatch_outcomes_n2.to_csv(output_dir / "dispatch_outcomes_n2.csv", index=False)
     market_totals_n2.to_csv(output_dir / "market_totals_n2.csv", index=False)
     return dispatch_outcomes_n2, market_totals_n2
+
+
+@app.cell
+def _(build_scenario_kpi_summary, condition2, market_totals_n2, n2, status2):
+    build_scenario_kpi_summary(
+        status=status2,
+        condition=condition2,
+        demand_series=n2.loads_t.p["Demand"],
+        market_totals=market_totals_n2,
+        extra_metrics=[
+            ("Hours at OCGT price", (n2.buses_t.marginal_price["NEM"] == 180).sum()),
+        ],
+    )
+    return
 
 
 @app.cell
@@ -571,43 +548,30 @@ def _(np, pd, pypsa):
 
 @app.cell
 def _(build_dispatch_price_figure, dispatch_order3, export_figure, n3):
-    dispatch_fig3 = build_dispatch_price_figure(
+    dispatch_price_fig3 = build_dispatch_price_figure(
         n3,
         dispatch_order=dispatch_order3,
-        panels=("dispatch",),
-        title=None,
+        panels=("dispatch", "price"),
         dispatch_title="Thu–Sun Dispatch — VIC Solar Penetration, Pre-BESS (10-min)",
+        price_title="Thu–Sun Shadow Price — VIC Solar Penetration, Pre-BESS (10-min)",
+        price_bus="NEM",
+        price_color="#2e8b57",
+        price_plot_style="line",
         legend_title="Generator",
         legend_ncols=5,
         legend_loc="upper center",
         legend_bbox=(0.5, 1.2),
         figure_legend=False,
-        figsize=(18, 4.8),
+        figsize=(18, 7.4),
+        date_tick_interval_hours=6,
     )
-    export_figure(dispatch_fig3)
-    dispatch_fig3
+    export_figure(dispatch_price_fig3, stem="n3_dispatch_price")
+    dispatch_price_fig3
     return
 
 
 @app.cell
-def _(build_dispatch_price_figure, export_figure, n3):
-    price_fig3 = build_dispatch_price_figure(
-        n3,
-        panels=("price",),
-        price_bus="NEM",
-        price_color="#2e8b57",
-        price_plot_style="line",
-        title=None,
-        price_title="Thu–Sun Shadow Price — VIC Solar Penetration, Pre-BESS (10-min)",
-        figsize=(18, 3.6),
-    )
-    export_figure(price_fig3)
-    price_fig3
-    return
-
-
-@app.cell
-def _(condition3, dispatch_order3, mo, n3, output_dir, pd, status3):
+def _(dispatch_order3, n3, output_dir, pd):
     _results3 = pd.concat(
         [
             n3.loads_t.p[["Demand"]].rename(columns={"Demand": "demand_mw"}),
@@ -619,8 +583,59 @@ def _(condition3, dispatch_order3, mo, n3, output_dir, pd, status3):
         axis=1,
     )
     _results3.to_csv(output_dir / "results_solar.csv")
+    return
 
-    mo.md(f"**Solve status:** `{status3}` — **Termination condition:** `{condition3}`")
+
+@app.cell
+def _(build_market_outcomes_tables, dispatch_order3, n3, output_dir):
+    dispatch_outcomes_n3, market_totals_n3 = build_market_outcomes_tables(
+        n3,
+        dispatch_order=dispatch_order3,
+        demand_name="Demand",
+        price_bus="NEM",
+    )
+    dispatch_outcomes_n3.to_csv(output_dir / "dispatch_outcomes_n3.csv", index=False)
+    market_totals_n3.to_csv(output_dir / "market_totals_n3.csv", index=False)
+    return dispatch_outcomes_n3, market_totals_n3
+
+
+@app.cell
+def _(build_scenario_kpi_summary, condition3, market_totals_n3, n3, status3):
+    build_scenario_kpi_summary(
+        status=status3,
+        condition=condition3,
+        demand_series=n3.loads_t.p["Demand"],
+        market_totals=market_totals_n3,
+        extra_metrics=[
+            ("Near-zero price hours", (n3.buses_t.marginal_price["NEM"] <= 0.5).sum() * (10.0 / 60.0)),
+        ],
+    )
+    return
+
+
+@app.cell
+def _(dispatch_outcomes_n3, market_totals_n3, render_market_outcomes_block):
+    render_market_outcomes_block(
+        dispatch_outcomes_n3,
+        market_totals_n3,
+        heading="N3 Dispatch Outcomes",
+        notes_md=(
+            "Solar reshapes both **energy share** and **price capture** across the Thu–Sun horizon. "
+            "Weekend midday curtailment and weekday evening gas-setting intervals are reflected in asset margins."
+        ),
+    )
+    return
+
+
+@app.cell
+def _(build_market_outcomes_dashboard, dispatch_outcomes_n3, export_figure):
+    outcomes_fig3 = build_market_outcomes_dashboard(
+        dispatch_outcomes_n3,
+        title="N3 Market Outcomes by Asset",
+        figsize=(20, 6.6),
+    )
+    export_figure(outcomes_fig3, stem="n3_outcomes_dashboard")
+    outcomes_fig3
     return
 
 
@@ -749,63 +764,27 @@ def _(np, pd, pypsa):
 
 
 @app.cell
-def _(condition4, mo, status4):
-    mo.md(f"**N4 solve status:** `{status4}` — **Termination:** `{condition4}`")
-    return
-
-
-@app.cell
 def _(build_dispatch_price_figure, dispatch_order4, export_figure, n4):
-    dispatch_fig4 = build_dispatch_price_figure(
+    dispatch_price_fig4 = build_dispatch_price_figure(
         n4,
         dispatch_order=dispatch_order4,
-        panels=("dispatch",),
-        title=None,
+        panels=("dispatch", "price"),
+        layout="dispatch_price_zoom",
         dispatch_title="N4 Unit Dispatch — Multi-Unit Thermal with Ramp Constraints",
+        price_title_full="N4 Shadow Price — Full",
+        price_title_zoom="N4 Shadow Price — Zoom [-250, 250]",
+        price_color="#b22222",
+        price_ylim_zoom=(-250, 250),
         legend_title="Generator",
         legend_ncols=3,
         legend_loc="upper center",
-        legend_bbox=(0.5, 1.2),
+        legend_bbox=(0.5, 1.18),
         figure_legend=False,
-        figsize=(18, 4.8),
+        figsize=(18, 8.6),
+        date_tick_interval_hours=6,
     )
-    export_figure(dispatch_fig4, stem="n4_dispatch")
-    dispatch_fig4
-    return
-
-
-@app.cell
-def _(export_figure, n4, plt):
-    price_fig4, (price_ax4_full, price_ax4_zoom) = plt.subplots(1, 2, figsize=(16, 4))
-
-    n4.buses_t.marginal_price["NEM"].plot(ax=price_ax4_full, color="#b22222", linewidth=1.5)
-    price_ax4_full.set_title("N4 Shadow Price — Full")
-    price_ax4_full.set_xlabel("Snapshot")
-    price_ax4_full.set_ylabel("Price ($/MWh)")
-    price_ax4_full.grid(axis="y", alpha=0.2)
-
-    n4.buses_t.marginal_price["NEM"].plot(ax=price_ax4_zoom, color="#b22222", linewidth=1.5)
-    price_ax4_zoom.set_title("N4 Shadow Price — Zoom [-250, 250]")
-    price_ax4_zoom.set_xlabel("Snapshot")
-    price_ax4_zoom.set_ylabel("Price ($/MWh)")
-    price_ax4_zoom.set_ylim(-250, 250)
-    price_ax4_zoom.grid(axis="y", alpha=0.2)
-
-    price_fig4.tight_layout()
-    export_figure(price_fig4, stem="n4_price")
-    price_ax4_zoom
-    return
-
-
-@app.cell
-def _(mo):
-    mo.md("""
-    ### N4 Diagnostics
-
-    - **Solar curtailment is expected** in this single-bus setup because thermal ramp-down limits can bind while demand falls; with no export path and no storage sink, some solar must be curtailed.
-    - The **+15500 then negative spike** around midnight on **2024-01-06** is an intertemporal ramp shadow-price effect from adjacent-period constraints, not because solar lacks ramp speed.
-    - Unit commitment (MILP) was removed: the 8-unit × 576-snapshot MILP did not converge in reasonable time, and dual-based prices from MILP are not economically meaningful anyway.
-    """)
+    export_figure(dispatch_price_fig4, stem="n4_dispatch_price_composite")
+    dispatch_price_fig4
     return
 
 
@@ -854,6 +833,67 @@ def _(dispatch_order4, n4, output_dir, pd, thermal_units_n4):
         }
     )
     _system_summary.to_csv(output_dir / "system_summary_n4.csv", index=False)
+    return
+
+
+@app.cell
+def _(build_market_outcomes_tables, dispatch_order4, n4, output_dir):
+    dispatch_outcomes_n4, market_totals_n4 = build_market_outcomes_tables(
+        n4,
+        dispatch_order=dispatch_order4,
+        demand_name="Demand",
+        price_bus="NEM",
+    )
+    dispatch_outcomes_n4.to_csv(output_dir / "dispatch_outcomes_n4.csv", index=False)
+    market_totals_n4.to_csv(output_dir / "market_totals_n4.csv", index=False)
+    return dispatch_outcomes_n4, market_totals_n4
+
+
+@app.cell
+def _(
+    build_scenario_kpi_summary,
+    condition4,
+    market_totals_n4,
+    n4,
+    status4,
+    thermal_units_n4,
+):
+    thermal_on_hours = (
+        (n4.generators_t.p[thermal_units_n4["unit_name"]] > 0).sum().sum() * (10.0 / 60.0)
+    )
+    build_scenario_kpi_summary(
+        status=status4,
+        condition=condition4,
+        demand_series=n4.loads_t.p["Demand"],
+        market_totals=market_totals_n4,
+        extra_metrics=[("Thermal on-hours (sum)", thermal_on_hours)],
+    )
+    return
+
+
+@app.cell
+def _(dispatch_outcomes_n4, market_totals_n4, render_market_outcomes_block):
+    render_market_outcomes_block(
+        dispatch_outcomes_n4,
+        market_totals_n4,
+        heading="N4 Dispatch Outcomes",
+        notes_md=(
+            "Thermal unit splitting and ramp constraints create **price volatility** and **margin separation** "
+            "within the thermal stack. Scarcity remains a modeled backstop rather than a regularly dispatched asset."
+        ),
+    )
+    return
+
+
+@app.cell
+def _(build_market_outcomes_dashboard, dispatch_outcomes_n4, export_figure):
+    outcomes_fig4 = build_market_outcomes_dashboard(
+        dispatch_outcomes_n4,
+        title="N4 Market Outcomes by Asset",
+        figsize=(20, 6.8),
+    )
+    export_figure(outcomes_fig4, stem="n4_outcomes_dashboard")
+    outcomes_fig4
     return
 
 
@@ -981,12 +1021,6 @@ def _(np, pd, pypsa, thermal_units_n4):
 
 
 @app.cell
-def _(condition5, mo, status5):
-    mo.md(f"**N5 solve status:** `{status5}` — **Termination:** `{condition5}`")
-    return
-
-
-@app.cell
 def _(build_dispatch_price_figure, dispatch_order5, export_figure, n5):
     dispatch_fig5 = build_dispatch_price_figure(
         n5,
@@ -1102,7 +1136,23 @@ def _(
         price_bus="NEM",
     )
     dispatch_outcomes_n5.to_csv(output_dir / "dispatch_outcomes_n5.csv", index=False)
+    market_totals_n5.to_csv(output_dir / "market_totals_n5.csv", index=False)
     return dispatch_outcomes_n5, market_totals_n5
+
+
+@app.cell
+def _(build_scenario_kpi_summary, condition5, market_totals_n5, n5, status5):
+    build_scenario_kpi_summary(
+        status=status5,
+        condition=condition5,
+        demand_series=n5.loads_t.p["Demand"],
+        market_totals=market_totals_n5,
+        extra_metrics=[
+            ("Total BESS discharge (MWh)", market_totals_n5.set_index("metric").at["Total BESS discharge (MWh)", "value"]),
+            ("Total BESS charge (MWh)", market_totals_n5.set_index("metric").at["Total BESS charge (MWh)", "value"]),
+        ],
+    )
+    return
 
 
 @app.cell

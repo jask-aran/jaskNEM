@@ -65,22 +65,125 @@ def _shade_price_windows(axes, price_series: pd.Series, threshold: float) -> Non
             axis.axvspan(start_dt, stop_dt, color="#d62728", alpha=0.08, lw=0)
 
 
+def _plot_dispatch_panel(
+    dispatch_ax,
+    *,
+    network,
+    x,
+    dispatch_order,
+    storage_name,
+    dispatch_colors,
+    dispatch_title,
+    legend_title,
+    legend_ncols,
+    legend_loc,
+    legend_bbox,
+    figure_legend,
+    fig,
+):
+    dispatch = network.generators_t.p[dispatch_order].clip(lower=0.0).copy()
+    legend_handles = None
+    legend_labels = None
+
+    if storage_name is not None and storage_name in network.storage_units.index:
+        dispatch["BESS discharge"] = network.storage_units_t.p_dispatch[storage_name].clip(lower=0.0)
+
+    stack_handles = dispatch_ax.stackplot(
+        x,
+        *[dispatch[column].to_numpy() for column in dispatch.columns],
+        labels=dispatch.columns,
+        colors=list(dispatch_colors or DEFAULT_DISPATCH_COLORS)[: len(dispatch.columns)],
+        alpha=0.95,
+    )
+    legend_handles = list(stack_handles)
+    legend_labels = list(dispatch.columns)
+
+    if storage_name is not None and storage_name in network.storage_units.index:
+        charge = network.storage_units_t.p_store[storage_name].clip(lower=0.0)
+        charge_handle = dispatch_ax.fill_between(
+            x,
+            0.0,
+            -charge.to_numpy(),
+            color="#4c78a8",
+            alpha=0.30,
+            label="BESS charge",
+        )
+        legend_handles.append(charge_handle)
+        legend_labels.append("BESS charge")
+
+    dispatch_ax.axhline(0.0, color="black", linewidth=0.8, alpha=0.6)
+    dispatch_ax.set_title(dispatch_title or "Dispatch")
+    dispatch_ax.set_ylabel("Dispatch (MW)")
+    dispatch_ax.grid(axis="y", alpha=0.2)
+
+    if figure_legend:
+        fig.legend(
+            legend_handles,
+            legend_labels,
+            title=legend_title,
+            ncols=legend_ncols,
+            loc=legend_loc,
+            bbox_to_anchor=legend_bbox,
+            frameon=True,
+        )
+    else:
+        dispatch_ax.legend(
+            title=legend_title,
+            ncols=legend_ncols,
+            loc=legend_loc,
+            bbox_to_anchor=legend_bbox,
+        )
+
+
+def _plot_price_panel(
+    price_ax,
+    *,
+    x,
+    price_series,
+    price_title,
+    price_color,
+    price_plot_style,
+    price_ylim,
+):
+    if price_plot_style == "step":
+        price_ax.step(x, price_series.to_numpy(), where="post", color=price_color, linewidth=1.8)
+    else:
+        price_ax.plot(x, price_series.to_numpy(), color=price_color, linewidth=1.5)
+    price_ax.set_title(price_title or "Shadow Price")
+    price_ax.set_ylabel("Price ($/MWh)")
+    if price_ylim is not None:
+        price_ax.set_ylim(*price_ylim)
+    price_ax.grid(axis="y", alpha=0.2)
+
+
+def _format_time_axis(axis, *, date_tick_interval_hours, date_format):
+    axis.set_xlabel("Snapshot")
+    if date_tick_interval_hours is not None:
+        axis.xaxis.set_major_locator(mdates.HourLocator(interval=date_tick_interval_hours))
+    axis.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
+    axis.tick_params(axis="x", labelrotation=0)
+
+
 def build_dispatch_price_figure(
     network,
     *,
     dispatch_order=None,
     panels: tuple[str, ...] = ("dispatch", "price"),
+    layout: str = "stacked",
     storage_name: str | None = None,
     price_bus: str = "NEM",
     near_zero_price_threshold: float | None = None,
     title: str | None = None,
     dispatch_title: str | None = None,
     price_title: str | None = None,
+    price_title_full: str | None = None,
+    price_title_zoom: str | None = None,
     soc_title: str | None = None,
     dispatch_colors: Iterable[str] | None = None,
     price_color: str = "#b22222",
     price_plot_style: str = "line",
     price_ylim: tuple[float, float] | None = None,
+    price_ylim_zoom: tuple[float, float] | None = None,
     legend_title: str = "Asset",
     legend_ncols: int = 4,
     legend_loc: str = "upper center",
@@ -105,110 +208,148 @@ def build_dispatch_price_figure(
     if "dispatch" in panel_list and dispatch_order is None:
         raise ValueError("dispatch_order is required when a dispatch panel is requested")
 
-    fig, axes = plt.subplots(
-        axes_count,
-        1,
-        figsize=figsize or (16, 3 + 2.6 * axes_count),
-        sharex=True,
-    )
-    axes = np.atleast_1d(axes)
-    axis_by_panel = dict(zip(panel_list, axes, strict=False))
     x = network.snapshots.to_pydatetime()
     price_series = network.buses_t.marginal_price[price_bus] if "price" in panel_list else None
 
-    if "dispatch" in axis_by_panel:
-        dispatch_ax = axis_by_panel["dispatch"]
-        dispatch = network.generators_t.p[dispatch_order].clip(lower=0.0).copy()
-        legend_handles = None
-        legend_labels = None
-
-        if storage_name is not None and storage_name in network.storage_units.index:
-            dispatch["BESS discharge"] = network.storage_units_t.p_dispatch[storage_name].clip(lower=0.0)
-
-        stack_handles = dispatch_ax.stackplot(
-            x,
-            *[dispatch[column].to_numpy() for column in dispatch.columns],
-            labels=dispatch.columns,
-            colors=list(dispatch_colors or DEFAULT_DISPATCH_COLORS)[: len(dispatch.columns)],
-            alpha=0.95,
+    if layout == "stacked":
+        fig, axes = plt.subplots(
+            axes_count,
+            1,
+            figsize=figsize or (16, 3 + 2.6 * axes_count),
+            sharex=True,
         )
-        legend_handles = list(stack_handles)
-        legend_labels = list(dispatch.columns)
+        axes = np.atleast_1d(axes)
+        axis_by_panel = dict(zip(panel_list, axes, strict=False))
 
-        if storage_name is not None and storage_name in network.storage_units.index:
-            charge = network.storage_units_t.p_store[storage_name].clip(lower=0.0)
-            charge_handle = dispatch_ax.fill_between(
-                x,
-                0.0,
-                -charge.to_numpy(),
-                color="#4c78a8",
-                alpha=0.30,
-                label="BESS charge",
-            )
-            legend_handles.append(charge_handle)
-            legend_labels.append("BESS charge")
-
-        dispatch_ax.axhline(0.0, color="black", linewidth=0.8, alpha=0.6)
-        dispatch_ax.set_title(dispatch_title or "Dispatch")
-        dispatch_ax.set_ylabel("Dispatch (MW)")
-        dispatch_ax.grid(axis="y", alpha=0.2)
-
-        if figure_legend:
-            fig.legend(
-                legend_handles,
-                legend_labels,
-                title=legend_title,
-                ncols=legend_ncols,
-                loc=legend_loc,
-                bbox_to_anchor=legend_bbox,
-                frameon=True,
-            )
-        else:
-            dispatch_ax.legend(
-                title=legend_title,
-                ncols=legend_ncols,
-                loc=legend_loc,
-                bbox_to_anchor=legend_bbox,
+        if "dispatch" in axis_by_panel:
+            _plot_dispatch_panel(
+                axis_by_panel["dispatch"],
+                network=network,
+                x=x,
+                dispatch_order=dispatch_order,
+                storage_name=storage_name,
+                dispatch_colors=dispatch_colors,
+                dispatch_title=dispatch_title,
+                legend_title=legend_title,
+                legend_ncols=legend_ncols,
+                legend_loc=legend_loc,
+                legend_bbox=legend_bbox,
+                figure_legend=figure_legend,
+                fig=fig,
             )
 
-    if "price" in axis_by_panel:
-        price_ax = axis_by_panel["price"]
-        if price_plot_style == "step":
-            price_ax.step(x, price_series.to_numpy(), where="post", color=price_color, linewidth=1.8)
-        else:
-            price_ax.plot(x, price_series.to_numpy(), color=price_color, linewidth=1.5)
-        price_ax.set_title(price_title or "Shadow Price")
-        price_ax.set_ylabel("Price ($/MWh)")
-        if price_ylim is not None:
-            price_ax.set_ylim(*price_ylim)
-        price_ax.grid(axis="y", alpha=0.2)
+        if "price" in axis_by_panel:
+            _plot_price_panel(
+                axis_by_panel["price"],
+                x=x,
+                price_series=price_series,
+                price_title=price_title,
+                price_color=price_color,
+                price_plot_style=price_plot_style,
+                price_ylim=price_ylim,
+            )
 
-    if "soc" in axis_by_panel:
-        soc_ax = axis_by_panel["soc"]
-        soc = network.storage_units_t.state_of_charge[storage_name]
-        soc_ax.plot(x, soc.to_numpy(), color="#1f77b4", linewidth=2.2)
-        soc_ax.fill_between(x, soc.to_numpy(), 0.0, color="#1f77b4", alpha=0.08)
-        soc_ax.set_title(soc_title or "State of Charge")
-        soc_ax.set_ylabel("SOC (MWh)")
-        soc_ax.set_xlabel("Snapshot")
-        soc_ax.set_ylim(0, max(float(network.storage_units.at[storage_name, "p_nom"]) * float(network.storage_units.at[storage_name, "max_hours"]), 1.0))
-        soc_ax.grid(axis="y", alpha=0.2)
+        if "soc" in axis_by_panel:
+            soc_ax = axis_by_panel["soc"]
+            soc = network.storage_units_t.state_of_charge[storage_name]
+            soc_ax.plot(x, soc.to_numpy(), color="#1f77b4", linewidth=2.2)
+            soc_ax.fill_between(x, soc.to_numpy(), 0.0, color="#1f77b4", alpha=0.08)
+            soc_ax.set_title(soc_title or "State of Charge")
+            soc_ax.set_ylabel("SOC (MWh)")
+            soc_ax.set_ylim(
+                0,
+                max(
+                    float(network.storage_units.at[storage_name, "p_nom"])
+                    * float(network.storage_units.at[storage_name, "max_hours"]),
+                    1.0,
+                ),
+            )
+            soc_ax.grid(axis="y", alpha=0.2)
 
-    if near_zero_price_threshold is not None and price_series is not None:
-        _shade_price_windows(axes, price_series, near_zero_price_threshold)
+        if near_zero_price_threshold is not None and price_series is not None:
+            _shade_price_windows(axes, price_series, near_zero_price_threshold)
 
-    bottom_ax = axes[-1]
-    bottom_ax.set_xlabel("Snapshot")
-    if date_tick_interval_hours is not None:
-        bottom_ax.xaxis.set_major_locator(mdates.HourLocator(interval=date_tick_interval_hours))
-    bottom_ax.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
-    bottom_ax.tick_params(axis="x", labelrotation=0)
+        _format_time_axis(
+            axes[-1],
+            date_tick_interval_hours=date_tick_interval_hours,
+            date_format=date_format,
+        )
+    elif layout == "dispatch_price_zoom":
+        if tuple(panel_list) != ("dispatch", "price"):
+            raise ValueError("layout='dispatch_price_zoom' requires panels=('dispatch', 'price')")
+        if storage_name is not None:
+            raise ValueError("layout='dispatch_price_zoom' does not support storage panels")
+
+        fig = plt.figure(figsize=figsize or (18, 8.2))
+        grid = fig.add_gridspec(2, 2, height_ratios=[2.3, 1.5], hspace=0.28, wspace=0.18)
+        dispatch_ax = fig.add_subplot(grid[0, :])
+        price_ax_full = fig.add_subplot(grid[1, 0], sharex=dispatch_ax)
+        price_ax_zoom = fig.add_subplot(grid[1, 1], sharex=dispatch_ax)
+        axes = np.array([dispatch_ax, price_ax_full, price_ax_zoom], dtype=object)
+
+        _plot_dispatch_panel(
+            dispatch_ax,
+            network=network,
+            x=x,
+            dispatch_order=dispatch_order,
+            storage_name=None,
+            dispatch_colors=dispatch_colors,
+            dispatch_title=dispatch_title,
+            legend_title=legend_title,
+            legend_ncols=legend_ncols,
+            legend_loc=legend_loc,
+            legend_bbox=legend_bbox,
+            figure_legend=figure_legend,
+            fig=fig,
+        )
+        _plot_price_panel(
+            price_ax_full,
+            x=x,
+            price_series=price_series,
+            price_title=price_title_full or price_title or "Shadow Price — Full",
+            price_color=price_color,
+            price_plot_style=price_plot_style,
+            price_ylim=price_ylim,
+        )
+        _plot_price_panel(
+            price_ax_zoom,
+            x=x,
+            price_series=price_series,
+            price_title=price_title_zoom or "Shadow Price — Zoom",
+            price_color=price_color,
+            price_plot_style=price_plot_style,
+            price_ylim=price_ylim_zoom,
+        )
+        price_ax_zoom.tick_params(axis="y", labelleft=True)
+
+        if near_zero_price_threshold is not None and price_series is not None:
+            _shade_price_windows(axes, price_series, near_zero_price_threshold)
+
+        _format_time_axis(
+            price_ax_full,
+            date_tick_interval_hours=date_tick_interval_hours,
+            date_format=date_format,
+        )
+        _format_time_axis(
+            price_ax_zoom,
+            date_tick_interval_hours=date_tick_interval_hours,
+            date_format=date_format,
+        )
+        dispatch_ax.tick_params(axis="x", labelbottom=False)
+    else:
+        raise ValueError(f"Unsupported layout={layout!r}")
 
     if title is not None:
         fig.suptitle(title, y=0.98)
-        fig.subplots_adjust(top=0.90, hspace=0.22)
+        if layout == "dispatch_price_zoom":
+            fig.subplots_adjust(top=0.90)
+        else:
+            fig.subplots_adjust(top=0.90, hspace=0.22)
     else:
-        fig.tight_layout()
+        if layout == "dispatch_price_zoom":
+            fig.subplots_adjust(left=0.07, right=0.98, bottom=0.08)
+        else:
+            fig.tight_layout()
 
     return fig
 
@@ -325,6 +466,39 @@ def build_market_outcomes_tables(
         }
     )
     return dispatch_outcomes, market_totals
+
+
+def build_scenario_kpi_summary(
+    *,
+    status: str,
+    condition: str,
+    demand_series: pd.Series,
+    market_totals: pd.DataFrame,
+    extra_metrics: list[tuple[str, object]] | None = None,
+) -> pd.DataFrame:
+    totals_lookup = market_totals.set_index("metric")["value"].to_dict()
+    rows: list[dict[str, object]] = [
+        {"metric": "Solve status", "value": status},
+        {"metric": "Termination condition", "value": condition},
+        {"metric": "Average demand (MW)", "value": float(demand_series.mean())},
+        {
+            "metric": "Average shadow price ($/MWh)",
+            "value": float(totals_lookup.get("Average shadow price ($/MWh)", float("nan"))),
+        },
+        {
+            "metric": "Peak shadow price ($/MWh)",
+            "value": float(totals_lookup.get("Peak shadow price ($/MWh)", float("nan"))),
+        },
+    ]
+
+    for metric, value in extra_metrics or []:
+        rows.append({"metric": metric, "value": value})
+
+    summary = pd.DataFrame(rows)
+    numeric_mask = summary["value"].map(lambda value: isinstance(value, (int, float, np.floating)))
+    summary.loc[numeric_mask, "value"] = summary.loc[numeric_mask, "value"].astype(float).round(1)
+    return summary
+
 
 def build_market_outcomes_dashboard(
     dispatch_outcomes_df: pd.DataFrame,
