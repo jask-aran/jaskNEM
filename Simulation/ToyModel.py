@@ -39,6 +39,27 @@ def _():
     output_dir.mkdir(parents=True, exist_ok=True)
     mo.md(f"Notebook outputs are written to `{output_dir}`.")
 
+    def summarize_snapshot_weightings(network, label):
+        weights = network.snapshot_weightings.astype(float)
+        unique_weights = weights.nunique(dropna=False)
+        expected_hours = 1.0
+        if len(network.snapshots) > 1 and hasattr(network.snapshots, "to_series"):
+            deltas = network.snapshots.to_series().diff().dropna()
+            expected_hours = deltas.dt.total_seconds().median() / 3600.0
+        return pd.DataFrame(
+            {
+                "scenario": [label],
+                "snapshot_count": [len(network.snapshots)],
+                "expected_hours_per_snapshot": [expected_hours],
+                "objective_weight": [weights["objective"].iloc[0]],
+                "stores_weight": [weights["stores"].iloc[0]],
+                "generators_weight": [weights["generators"].iloc[0]],
+                "objective_unique_values": [int(unique_weights["objective"])],
+                "stores_unique_values": [int(unique_weights["stores"])],
+                "generators_unique_values": [int(unique_weights["generators"])],
+            }
+        )
+
     def export_figure(fig, stem=None):
         if stem is None:
             title = fig._suptitle.get_text() if fig._suptitle else ""
@@ -109,6 +130,7 @@ def _():
         pd,
         pypsa,
         render_market_outcomes_block,
+        summarize_snapshot_weightings,
     )
 
 
@@ -288,7 +310,10 @@ def _(mo):
 @app.cell
 def _(np, pd, pypsa):
     n2 = pypsa.Network()
-    n2.set_snapshots(pd.date_range("2024-01-01", periods=336, freq="30min").as_unit("ns"))
+    n2.set_snapshots(
+        pd.date_range("2024-01-01", periods=336, freq="30min").as_unit("ns"),
+        weightings_from_timedelta=True,
+    )
     n2.add("Carrier", "AC")
     n2.add("Bus", "NEM", carrier="AC")
     for _carrier in ["brown_coal", "black_coal", "ccgt", "ocgt"]:
@@ -468,7 +493,10 @@ def _(mo):
 @app.cell
 def _(np, pd, pypsa):
     n3 = pypsa.Network()
-    n3.set_snapshots(pd.date_range("2024-01-04", periods=576, freq="10min").as_unit("ns"))
+    n3.set_snapshots(
+        pd.date_range("2024-01-04", periods=576, freq="10min").as_unit("ns"),
+        weightings_from_timedelta=True,
+    )
     n3.add("Carrier", "AC")
     n3.add("Bus", "NEM", carrier="AC")
 
@@ -664,7 +692,7 @@ def _(np, pd, pypsa):
             {"unit_name": "Black Coal B", "tech": "black_coal", "p_nom_mw": 2200, "marginal_cost": 44.0},
             {"unit_name": "CCGT A", "tech": "ccgt", "p_nom_mw": 1200, "marginal_cost": 82.0},
             {"unit_name": "CCGT B", "tech": "ccgt", "p_nom_mw": 800, "marginal_cost": 90.0},
-            {"unit_name": "OCGT A", "tech": "ocgt", "p_nom_mw": 800, "marginal_cost": 185.0},
+            {"unit_name": "OCGT A", "tech": "ocgt", "p_nom_mw": 800, "marginal_cost": 260.0},
         ]
     )
 
@@ -706,23 +734,29 @@ def _(np, pd, pypsa):
 
     def build_n4():
         n4 = pypsa.Network()
-        n4.set_snapshots(pd.date_range("2024-01-04", periods=576, freq="10min").as_unit("ns"))
+        n4.set_snapshots(
+            pd.date_range("2024-01-04", periods=576, freq="10min").as_unit("ns"),
+            weightings_from_timedelta=True,
+        )
         n4.add("Carrier", "AC")
         n4.add("Bus", "NEM", carrier="AC")
         for _carrier in ["solar", "brown_coal", "black_coal", "ccgt", "ocgt", "scarcity"]:
             n4.add("Carrier", _carrier)
 
         slot_of_day = np.arange(576) % 144
+        peak_adder = np.ones(144)
+        peak_adder[96:126] = 1.05
+        peak_adder[102:120] = 1.08
         solar_pu = np.exp(-0.5 * ((slot_of_day - 72) / 15.0) ** 2)
         n4.add("Generator", "Solar", bus="NEM", carrier="solar", p_nom=6000, marginal_cost=0.0)
         n4.generators_t.p_max_pu = pd.DataFrame({"Solar": solar_pu}, index=n4.snapshots)
 
         demand_shape = np.concatenate(
             [
-                _to_10min(weekday_h) * 1.00,
-                _to_10min(weekday_h) * 0.97,
-                _to_10min(weekend_h) * 0.87,
-                _to_10min(weekend_h) * 0.83,
+                _to_10min(weekday_h) * 1.00 * peak_adder,
+                _to_10min(weekday_h) * 0.97 * peak_adder,
+                _to_10min(weekend_h) * 0.87 * peak_adder,
+                _to_10min(weekend_h) * 0.83 * peak_adder,
             ]
         )
         rng = np.random.default_rng(7)
@@ -854,6 +888,14 @@ def _(build_market_outcomes_tables, dispatch_order4, n4, output_dir):
 
 
 @app.cell
+def _(n4, output_dir, summarize_snapshot_weightings):
+    weighting_summary_n4 = summarize_snapshot_weightings(n4, "N4")
+    weighting_summary_n4.to_csv(output_dir / "snapshot_weightings_n4.csv", index=False)
+    weighting_summary_n4
+    return
+
+
+@app.cell
 def _(
     build_scenario_kpi_summary,
     condition4,
@@ -908,28 +950,52 @@ def _(mo):
 
     Direct extension of N4 with the same 4-day, 10-minute horizon, demand, solar,
     and 8-unit thermal fleet. Adds a single aggregate BESS representing the
-    VIC grid-scale fleet:
+    VIC grid-scale fleet and explicitly uses elapsed-hour snapshot weighting so
+    PyPSA solves the 10-minute horizon on a physically correct sub-hourly basis:
 
-    - **600 MW / 1,200 MWh** (2-hour duration)
+    - **600 MW / 900 MWh** (1.5-hour duration)
     - **84.6 % round-trip efficiency** (92 % store × 92 % dispatch)
-    - **50 % initial SOC** (600 MWh at Thursday 00:00)
-    - **Tiny storage value adder** to avoid unrealistic last-minute charging in flat zero-price windows
-    - LP dispatch: optimizer charges during cheap/negative-price periods and
-      discharges during scarcity peaks
+    - **50 % initial SOC** (450 MWh at Thursday 00:00)
+    - **Higher peaker marginal cost** so the evening peak more often clears on expensive gas
+    - LP dispatch: optimizer charges during cheap/near-zero-price periods and
+      discharges into afternoon and evening gas-priced peaks
 
-    Expected effects vs N4: reduced negative midday price depth, fewer
-    $15,500/MWh scarcity events, coal displacement during evening peaks.
+    Expected effects vs N4: retained near-zero midday solar pricing, stronger
+    gas-priced evening peaks, more visible BESS arbitrage, and larger high-cost
+    thermal displacement.
 
-    The small `marginal_cost_storage` term is a **modeling choice**, not a literal
-    market rule. It acts as a gentle tie-breaker so the battery values being charged
-    a little earlier within long flat zero-price periods, instead of waiting until
-    the last possible snapshots under perfect foresight.
+    The BESS has no additional storage-value adder in this calibration. Charging
+    and discharging decisions are driven purely by observed arbitrage value under
+    perfect foresight.
     """)
     return
 
 
 @app.cell
-def _(np, pd, pypsa, thermal_units_n4):
+def _():
+    n5_bess_power_mw = 600.0
+    n5_bess_energy_mwh = 900.0
+    n5_bess_initial_soc_mwh = 450.0
+    n5_bess_cyclic_state_of_charge = True
+    return (
+        n5_bess_cyclic_state_of_charge,
+        n5_bess_energy_mwh,
+        n5_bess_initial_soc_mwh,
+        n5_bess_power_mw,
+    )
+
+
+@app.cell
+def _(
+    n5_bess_cyclic_state_of_charge,
+    n5_bess_energy_mwh,
+    n5_bess_initial_soc_mwh,
+    n5_bess_power_mw,
+    np,
+    pd,
+    pypsa,
+    thermal_units_n4,
+):
     _ramp_defaults = {
         "brown_coal": {"ramp_limit_up": 0.030, "ramp_limit_down": 0.030},
         "black_coal": {"ramp_limit_up": 0.045, "ramp_limit_down": 0.045},
@@ -963,22 +1029,28 @@ def _(np, pd, pypsa, thermal_units_n4):
 
     def build_n5():
         n5 = pypsa.Network()
-        n5.set_snapshots(pd.date_range("2024-01-04", periods=576, freq="10min").as_unit("ns"))
+        n5.set_snapshots(
+            pd.date_range("2024-01-04", periods=576, freq="10min").as_unit("ns"),
+            weightings_from_timedelta=True,
+        )
         n5.add("Carrier", "AC")
         n5.add("Bus", "NEM", carrier="AC")
         for _carrier in ["solar", "brown_coal", "black_coal", "ccgt", "ocgt", "scarcity", "bess"]:
             n5.add("Carrier", _carrier)
 
         _slot = np.arange(576) % 144
+        _peak_adder = np.ones(144)
+        _peak_adder[96:126] = 1.05
+        _peak_adder[102:120] = 1.08
         _solar_pu = np.exp(-0.5 * ((_slot - 72) / 15.0) ** 2)
         n5.add("Generator", "Solar", bus="NEM", carrier="solar", p_nom=6000, marginal_cost=0.0)
         n5.generators_t.p_max_pu = pd.DataFrame({"Solar": _solar_pu}, index=n5.snapshots)
 
         _demand_shape = np.concatenate([
-            _to_10min(_weekday_h) * 1.00,
-            _to_10min(_weekday_h) * 0.97,
-            _to_10min(_weekend_h) * 0.87,
-            _to_10min(_weekend_h) * 0.83,
+            _to_10min(_weekday_h) * 1.00 * _peak_adder,
+            _to_10min(_weekday_h) * 0.97 * _peak_adder,
+            _to_10min(_weekend_h) * 0.87 * _peak_adder,
+            _to_10min(_weekend_h) * 0.83 * _peak_adder,
         ])
         _rng = np.random.default_rng(7)  # same seed as N4 for controlled comparison
         _noise = _rng.normal(0.0, 0.008, 576)
@@ -1003,14 +1075,16 @@ def _(np, pd, pypsa, thermal_units_n4):
             "StorageUnit", "BESS",
             bus="NEM",
             carrier="bess",
-            p_nom=600.0,
-            max_hours=2.0,
+            p_nom=n5_bess_power_mw,
+            max_hours=n5_bess_energy_mwh / n5_bess_power_mw,
             efficiency_store=0.92,
             efficiency_dispatch=0.92,
-            state_of_charge_initial=600.0,
-            cyclic_state_of_charge=False,
+            state_of_charge_initial=(
+                n5_bess_initial_soc_mwh if not n5_bess_cyclic_state_of_charge else 0.0
+            ),
+            cyclic_state_of_charge=n5_bess_cyclic_state_of_charge,
             marginal_cost=0.0,
-            marginal_cost_storage=-0.05,
+            marginal_cost_storage=0.0,
         )
 
         _dispatch_order = pd.Index(
@@ -1097,6 +1171,14 @@ def _(
 
 
 @app.cell
+def _(n5, output_dir, summarize_snapshot_weightings):
+    weighting_summary_n5 = summarize_snapshot_weightings(n5, "N5")
+    weighting_summary_n5.to_csv(output_dir / "snapshot_weightings_n5.csv", index=False)
+    weighting_summary_n5
+    return
+
+
+@app.cell
 def _(n4, n5, output_dir, pd, thermal_units_n4):
     _dt = 10.0 / 60.0  # hours per 10-min snapshot
 
@@ -1131,6 +1213,16 @@ def _(n4, n5, output_dir, pd, thermal_units_n4):
         _displacement["delta_mwh"] / _displacement["dispatched_mwh_n4"] * 100
     ).round(1)
     _displacement.to_csv(output_dir / "displacement_n5.csv", index=False)
+
+    _displacement_by_tech = (
+        _displacement.merge(_thermal_idx[["tech"]], left_on="unit", right_index=True)
+        .groupby("tech", as_index=False)[["dispatched_mwh_n4", "dispatched_mwh_n5", "delta_mwh"]]
+        .sum()
+    )
+    _displacement_by_tech["pct_change"] = (
+        _displacement_by_tech["delta_mwh"] / _displacement_by_tech["dispatched_mwh_n4"] * 100
+    ).round(1)
+    _displacement_by_tech.to_csv(output_dir / "displacement_by_tech_n5.csv", index=False)
     return
 
 
@@ -1148,17 +1240,43 @@ def _(n5, output_dir, pd):
     _arb_value = (
         (_discharge * _price * _dt).sum() - (_charge * _price * _dt).sum()
     )
+    _energy_capacity = (
+        float(n5.storage_units.at["BESS", "p_nom"]) * float(n5.storage_units.at["BESS", "max_hours"])
+    )
+    _full_cycles = _total_discharged / _energy_capacity if _energy_capacity > 0 else 0.0
+    _near_full_hours = (_dt * (_soc := n5.storage_units_t.state_of_charge["BESS"]).ge(0.95 * _energy_capacity).sum())
+    _high_discharge_hours = (_dt * _discharge.ge(0.75 * float(n5.storage_units.at["BESS", "p_nom"])).sum())
+    _high_price_threshold = max(120.0, float(_price.quantile(0.95)))
+    _discharge_high_price_mwh = (_discharge[_price >= _high_price_threshold] * _dt).sum()
+    _high_price_discharge_share = (
+        _discharge_high_price_mwh / _total_discharged if _total_discharged > 0 else 0.0
+    )
     pd.DataFrame([{
         "total_charged_mwh": round(_total_charged, 1),
         "total_discharged_mwh": round(_total_discharged, 1),
         "rt_efficiency_realised": round(_rt_eff, 4),
         "arbitrage_value_aud": round(_arb_value, 0),
+        "full_equivalent_cycles": round(_full_cycles, 3),
+        "hours_near_full_soc": round(_near_full_hours, 2),
+        "hours_high_discharge": round(_high_discharge_hours, 2),
+        "high_price_threshold_aud_per_mwh": round(_high_price_threshold, 2),
+        "discharge_mwh_above_high_price_threshold": round(_discharge_high_price_mwh, 1),
+        "share_of_discharge_above_high_price_threshold": round(_high_price_discharge_share, 4),
     }]).to_csv(output_dir / "bess_economics_n5.csv", index=False)
     return
 
 
 @app.cell
-def _(build_scenario_kpi_summary, condition5, market_totals_n5, n5, status5):
+def _(
+    build_scenario_kpi_summary,
+    condition5,
+    market_totals_n5,
+    n5,
+    output_dir,
+    pd,
+    status5,
+):
+    _bess_economics = pd.read_csv(output_dir / "bess_economics_n5.csv").iloc[0]
     build_scenario_kpi_summary(
         status=status5,
         condition=condition5,
@@ -1167,6 +1285,8 @@ def _(build_scenario_kpi_summary, condition5, market_totals_n5, n5, status5):
         extra_metrics=[
             ("Total BESS discharge (MWh)", market_totals_n5.set_index("metric").at["Total BESS discharge (MWh)", "value"]),
             ("Total BESS charge (MWh)", market_totals_n5.set_index("metric").at["Total BESS charge (MWh)", "value"]),
+            ("BESS full-equivalent cycles", _bess_economics["full_equivalent_cycles"]),
+            ("High-price discharge share", _bess_economics["share_of_discharge_above_high_price_threshold"] * 100),
         ],
     )
     return
@@ -1181,7 +1301,9 @@ def _(dispatch_outcomes_n5, market_totals_n5, render_market_outcomes_block):
         notes_md=(
             "Demand share uses **total N5 demand energy** over the full horizon. "
             "Realized sell price is **gross revenue / dispatched MWh**. "
-            "For **BESS**, gross margin equals **discharge revenue minus charging cost**."
+            "For **BESS**, gross margin equals **discharge revenue minus charging cost**. "
+            "The exported `bess_economics_n5.csv` now also reports full-equivalent cycles, "
+            "time spent near full SOC, and the share of discharge captured in high-price windows."
         ),
     )
     return

@@ -38,14 +38,7 @@ def _snapshot_hours(network) -> pd.Series:
         weights = pd.Series(weights, index=network.snapshots, dtype=float)
     else:
         weights = weights.astype(float)
-
-    if len(network.snapshots) <= 1:
-        base_hours = 1.0
-    else:
-        deltas = network.snapshots.to_series().diff().dropna()
-        base_hours = deltas.dt.total_seconds().median() / 3600.0
-
-    return weights * base_hours
+    return weights
 
 
 def _shade_price_windows(axes, price_series: pd.Series, threshold: float) -> None:
