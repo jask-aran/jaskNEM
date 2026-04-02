@@ -207,6 +207,7 @@ def _(dispatch_order, n, output_dir, pd):
         _generator_summary["average_dispatch_mw"] / _generator_summary["capacity_mw"]
     ).round(3)
 
+    # system_summary_n4.csv: compact scenario KPIs retained for offline review.
     _system_summary = pd.DataFrame(
         {
             "metric": [
@@ -791,6 +792,7 @@ def _(build_dispatch_price_figure, dispatch_order4, export_figure, n4):
 @app.cell
 def _(dispatch_order4, n4, output_dir, pd, thermal_units_n4):
     _dt = 10.0 / 60.0  # hours per 10-min snapshot
+    # results_n4.csv: time-series demand, price, and dispatch trace for the N4 scenario.
     _results = pd.concat(
         [
             n4.loads_t.p[["Demand"]].rename(columns={"Demand": "demand_mw"}),
@@ -803,6 +805,7 @@ def _(dispatch_order4, n4, output_dir, pd, thermal_units_n4):
     )
     _results.to_csv(output_dir / "results_n4.csv")
 
+    # unit_summary_n4.csv: unit-level thermal operating summary across the full N4 horizon.
     _thermal_units_idx = thermal_units_n4.set_index("unit_name")
     _unit_summary = _thermal_units_idx[["tech", "p_nom_mw", "marginal_cost"]].rename(
         columns={"p_nom_mw": "capacity_mw", "marginal_cost": "marginal_cost_per_mwh"}
@@ -838,6 +841,7 @@ def _(dispatch_order4, n4, output_dir, pd, thermal_units_n4):
 
 @app.cell
 def _(build_market_outcomes_tables, dispatch_order4, n4, output_dir):
+    # dispatch_outcomes_n4.csv and market_totals_n4.csv: shared market outcomes for notebook tables and exports.
     dispatch_outcomes_n4, market_totals_n4 = build_market_outcomes_tables(
         n4,
         dispatch_order=dispatch_order4,
@@ -1052,7 +1056,6 @@ def _(build_dispatch_price_figure, dispatch_order5, export_figure, n5):
 def _(
     build_market_outcomes_tables,
     dispatch_order5,
-    n4,
     n5,
     output_dir,
     pd,
@@ -1060,7 +1063,7 @@ def _(
 ):
     _dt = 10.0 / 60.0  # hours per 10-min snapshot
 
-    # --- results_n5.csv ---
+    # results_n5.csv: time-series demand, price, dispatch, charge, discharge, and SOC trace.
     _charge = n5.storage_units_t.p_store["BESS"]
     _discharge = n5.storage_units_t.p_dispatch["BESS"]
     _soc = n5.storage_units_t.state_of_charge["BESS"]
@@ -1079,7 +1082,25 @@ def _(
     )
     _results.to_csv(output_dir / "results_n5.csv")
 
-    # --- unit_summary_n5.csv ---
+    # dispatch_outcomes_n5.csv and market_totals_n5.csv: shared market outcomes for notebook tables and exports.
+    dispatch_outcomes_n5, market_totals_n5 = build_market_outcomes_tables(
+        n5,
+        dispatch_order=dispatch_order5,
+        thermal_units=thermal_units_n4,
+        storage_name="BESS",
+        demand_name="Demand",
+        price_bus="NEM",
+    )
+    dispatch_outcomes_n5.to_csv(output_dir / "dispatch_outcomes_n5.csv", index=False)
+    market_totals_n5.to_csv(output_dir / "market_totals_n5.csv", index=False)
+    return dispatch_outcomes_n5, market_totals_n5
+
+
+@app.cell
+def _(n4, n5, output_dir, pd, thermal_units_n4):
+    _dt = 10.0 / 60.0  # hours per 10-min snapshot
+
+    # unit_summary_n5.csv: unit-level thermal operating summary across the full N5 horizon.
     _thermal_idx = thermal_units_n4.set_index("unit_name")
     _unit_summary = _thermal_idx[["tech", "p_nom_mw", "marginal_cost"]].rename(
         columns={"p_nom_mw": "capacity_mw", "marginal_cost": "marginal_cost_per_mwh"}
@@ -1095,7 +1116,7 @@ def _(
     _unit_summary = _unit_summary.reset_index(names="unit")
     _unit_summary.to_csv(output_dir / "unit_summary_n5.csv", index=False)
 
-    # --- displacement_n5.csv ---
+    # displacement_n5.csv: N4-versus-N5 thermal output change by unit after adding the BESS.
     _dispatched_n4 = (n4.generators_t.p[_thermal_idx.index] * _dt).sum()
     _dispatched_n5 = (n5.generators_t.p[_thermal_idx.index] * _dt).sum()
     _displacement = (
@@ -1110,8 +1131,16 @@ def _(
         _displacement["delta_mwh"] / _displacement["dispatched_mwh_n4"] * 100
     ).round(1)
     _displacement.to_csv(output_dir / "displacement_n5.csv", index=False)
+    return
 
-    # --- bess_economics_n5.csv ---
+
+@app.cell
+def _(n5, output_dir, pd):
+    _dt = 10.0 / 60.0  # hours per 10-min snapshot
+
+    # bess_economics_n5.csv: aggregate BESS charge, discharge, realised efficiency, and arbitrage value.
+    _charge = n5.storage_units_t.p_store["BESS"]
+    _discharge = n5.storage_units_t.p_dispatch["BESS"]
     _total_charged = (_charge * _dt).sum()
     _total_discharged = (_discharge * _dt).sum()
     _rt_eff = _total_discharged / _total_charged if _total_charged > 0 else 0.0
@@ -1125,19 +1154,7 @@ def _(
         "rt_efficiency_realised": round(_rt_eff, 4),
         "arbitrage_value_aud": round(_arb_value, 0),
     }]).to_csv(output_dir / "bess_economics_n5.csv", index=False)
-
-    # --- dispatch_outcomes_n5.csv ---
-    dispatch_outcomes_n5, market_totals_n5 = build_market_outcomes_tables(
-        n5,
-        dispatch_order=dispatch_order5,
-        thermal_units=thermal_units_n4,
-        storage_name="BESS",
-        demand_name="Demand",
-        price_bus="NEM",
-    )
-    dispatch_outcomes_n5.to_csv(output_dir / "dispatch_outcomes_n5.csv", index=False)
-    market_totals_n5.to_csv(output_dir / "market_totals_n5.csv", index=False)
-    return dispatch_outcomes_n5, market_totals_n5
+    return
 
 
 @app.cell
