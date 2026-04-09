@@ -25,6 +25,9 @@ def _():
     import Simulation.pypsa_viz as pypsa_viz
 
     pypsa_viz = importlib.reload(pypsa_viz)
+    build_multiregion_summary_tables = pypsa_viz.build_multiregion_summary_tables
+    build_multiscenario_comparison_dashboard = pypsa_viz.build_multiscenario_comparison_dashboard
+    build_two_region_figure = pypsa_viz.build_two_region_figure
     build_dispatch_price_figure = pypsa_viz.build_dispatch_price_figure
     build_market_outcomes_dashboard = pypsa_viz.build_market_outcomes_dashboard
     build_market_outcomes_tables = pypsa_viz.build_market_outcomes_tables
@@ -121,7 +124,10 @@ def _():
         build_dispatch_price_figure,
         build_market_outcomes_dashboard,
         build_market_outcomes_tables,
+        build_multiregion_summary_tables,
+        build_multiscenario_comparison_dashboard,
         build_scenario_kpi_summary,
+        build_two_region_figure,
         export_figure,
         mo,
         np,
@@ -650,15 +656,15 @@ def _(
 def _(market_totals_base, market_totals_ramp_stress, pd):
     base_lookup = market_totals_base.set_index("metric")["value"]
     ramp_lookup = market_totals_ramp_stress.set_index("metric")["value"]
-    comparison = pd.DataFrame(
+    _comparison = pd.DataFrame(
         {
             "metric": base_lookup.index,
             "base": base_lookup.values,
             "ramp_stress": ramp_lookup.reindex(base_lookup.index).values,
         }
     )
-    comparison["delta"] = comparison["ramp_stress"] - comparison["base"]
-    comparison.round(1)
+    _comparison["delta"] = _comparison["ramp_stress"] - _comparison["base"]
+    _comparison.round(1)
     return
 
 
@@ -687,66 +693,6 @@ def _(mo):
         "The modeling aim is still intuition, not calibration.
     """)
     return
-
-
-@app.cell
-def _(plt):
-    def build_two_region_figure(
-        network,
-        *,
-        vic_dispatch_order,
-        sa_dispatch_order,
-        line_name="VIC-SA Interconnector",
-        storage_name="SA BESS",
-    ):
-        x = network.snapshots.to_pydatetime()
-        fig, axes = plt.subplots(5, 1, figsize=(18, 15), sharex=True)
-
-        vic_dispatch = network.generators_t.p[vic_dispatch_order].clip(lower=0.0)
-        axes[0].stackplot(x, *[vic_dispatch[col].to_numpy() for col in vic_dispatch.columns], labels=vic_dispatch.columns, alpha=0.95)
-        axes[0].set_title("VIC dispatch")
-        axes[0].set_ylabel("MW")
-        axes[0].grid(axis="y", alpha=0.2)
-        axes[0].legend(ncols=4, loc="upper center", bbox_to_anchor=(0.5, 1.24))
-
-        sa_dispatch = network.generators_t.p[sa_dispatch_order].clip(lower=0.0).copy()
-        sa_dispatch["SA BESS discharge"] = network.storage_units_t.p_dispatch[storage_name].clip(lower=0.0)
-        axes[1].stackplot(x, *[sa_dispatch[col].to_numpy() for col in sa_dispatch.columns], labels=sa_dispatch.columns, alpha=0.95)
-        sa_charge = network.storage_units_t.p_store[storage_name].clip(lower=0.0)
-        axes[1].fill_between(x, 0.0, -sa_charge.to_numpy(), color="#4c78a8", alpha=0.28, label="SA BESS charge")
-        axes[1].axhline(0.0, color="black", linewidth=0.8, alpha=0.6)
-        axes[1].set_title("SA dispatch")
-        axes[1].set_ylabel("MW")
-        axes[1].grid(axis="y", alpha=0.2)
-        axes[1].legend(ncols=4, loc="upper center", bbox_to_anchor=(0.5, 1.24))
-
-        line_flow = network.lines_t.p0[line_name]
-        axes[2].plot(x, line_flow.to_numpy(), color="#6f4e7c", linewidth=1.7)
-        axes[2].axhline(0.0, color="black", linewidth=0.8, alpha=0.6)
-        axes[2].set_title("Interconnector flow (positive = VIC → SA)")
-        axes[2].set_ylabel("MW")
-        axes[2].grid(axis="y", alpha=0.2)
-
-        axes[3].plot(x, network.buses_t.marginal_price["VIC"].to_numpy(), color="#1f77b4", linewidth=1.7, label="VIC")
-        axes[3].plot(x, network.buses_t.marginal_price["SA"].to_numpy(), color="#d62728", linewidth=1.7, label="SA")
-        axes[3].set_title("Regional shadow prices")
-        axes[3].set_ylabel("$/MWh")
-        axes[3].grid(axis="y", alpha=0.2)
-        axes[3].legend(loc="upper right")
-
-        soc = network.storage_units_t.state_of_charge[storage_name]
-        axes[4].plot(x, soc.to_numpy(), color="#2a6f97", linewidth=2.0)
-        axes[4].fill_between(x, soc.to_numpy(), 0.0, color="#2a6f97", alpha=0.10)
-        axes[4].set_title("SA BESS state of charge")
-        axes[4].set_ylabel("MWh")
-        axes[4].set_xlabel("Snapshot")
-        axes[4].grid(axis="y", alpha=0.2)
-
-        fig.suptitle("Toy Model 2 N6 — VIC/SA dispatch, flows, prices, and storage", y=0.995)
-        fig.subplots_adjust(hspace=0.32, top=0.93)
-        return fig
-
-    return (build_two_region_figure,)
 
 
 @app.cell
@@ -933,15 +879,15 @@ def _(n6, output_dir, pd, summarize_snapshot_weightings):
     )
     results_n6.to_csv(output_dir / "results_tm2_n6_multiregion.csv")
 
-    weights = n6.snapshot_weightings.objective.astype(float)
+    _weights = n6.snapshot_weightings.objective.astype(float)
     asset_rows = []
     for asset in n6.generators.index:
         bus = n6.generators.at[asset, "bus"]
         dispatch = n6.generators_t.p[asset].clip(lower=0.0)
-        dispatched_mwh = (dispatch * weights).sum()
+        dispatched_mwh = (dispatch * _weights).sum()
         price = n6.buses_t.marginal_price[bus]
-        gross_revenue = (dispatch * price * weights).sum()
-        variable_cost = (dispatch * float(n6.generators.at[asset, "marginal_cost"]) * weights).sum()
+        gross_revenue = (dispatch * price * _weights).sum()
+        variable_cost = (dispatch * float(n6.generators.at[asset, "marginal_cost"]) * _weights).sum()
         asset_rows.append(
             {
                 "asset": asset,
@@ -965,10 +911,10 @@ def _(n6, output_dir, pd, summarize_snapshot_weightings):
             "bus": storage_bus,
             "type": "bess",
             "capacity_mw": float(n6.storage_units.at["SA BESS", "p_nom"]),
-            "dispatched_mwh": (storage_discharge * weights).sum(),
-            "gross_revenue_aud": (storage_discharge * storage_price * weights).sum(),
-            "variable_cost_aud": (storage_charge * storage_price * weights).sum(),
-            "gross_margin_aud": ((storage_discharge - storage_charge) * storage_price * weights).sum(),
+            "dispatched_mwh": (storage_discharge * _weights).sum(),
+            "gross_revenue_aud": (storage_discharge * storage_price * _weights).sum(),
+            "variable_cost_aud": (storage_charge * storage_price * _weights).sum(),
+            "gross_margin_aud": ((storage_discharge - storage_charge) * storage_price * _weights).sum(),
         }
     )
     asset_summary_n6 = pd.DataFrame(asset_rows).sort_values(["bus", "gross_margin_aud"], ascending=[True, False]).reset_index(drop=True)
@@ -978,23 +924,23 @@ def _(n6, output_dir, pd, summarize_snapshot_weightings):
         [
             {
                 "region": "VIC",
-                "total_demand_mwh": (n6.loads_t.p["VIC Demand"] * weights).sum(),
+                "total_demand_mwh": (n6.loads_t.p["VIC Demand"] * _weights).sum(),
                 "average_price_aud_per_mwh": n6.buses_t.marginal_price["VIC"].mean(),
                 "peak_price_aud_per_mwh": n6.buses_t.marginal_price["VIC"].max(),
-                "local_generation_mwh": (n6.generators_t.p[[g for g in n6.generators.index if n6.generators.at[g, "bus"] == "VIC"]].clip(lower=0.0).multiply(weights, axis=0)).sum().sum(),
+                "local_generation_mwh": (n6.generators_t.p[[g for g in n6.generators.index if n6.generators.at[g, "bus"] == "VIC"]].clip(lower=0.0).multiply(_weights, axis=0)).sum().sum(),
             },
             {
                 "region": "SA",
-                "total_demand_mwh": (n6.loads_t.p["SA Demand"] * weights).sum(),
+                "total_demand_mwh": (n6.loads_t.p["SA Demand"] * _weights).sum(),
                 "average_price_aud_per_mwh": n6.buses_t.marginal_price["SA"].mean(),
                 "peak_price_aud_per_mwh": n6.buses_t.marginal_price["SA"].max(),
-                "local_generation_mwh": (n6.generators_t.p[[g for g in n6.generators.index if n6.generators.at[g, "bus"] == "SA"]].clip(lower=0.0).multiply(weights, axis=0)).sum().sum(),
+                "local_generation_mwh": (n6.generators_t.p[[g for g in n6.generators.index if n6.generators.at[g, "bus"] == "SA"]].clip(lower=0.0).multiply(_weights, axis=0)).sum().sum(),
             },
         ]
     )
     regional_summary_n6["net_import_mwh"] = [
-        -(n6.lines_t.p0["VIC-SA Interconnector"] * weights).sum(),
-        (n6.lines_t.p0["VIC-SA Interconnector"] * weights).sum(),
+        -(n6.lines_t.p0["VIC-SA Interconnector"] * _weights).sum(),
+        (n6.lines_t.p0["VIC-SA Interconnector"] * _weights).sum(),
     ]
     regional_summary_n6.to_csv(output_dir / "regional_summary_tm2_n6_multiregion.csv", index=False)
 
@@ -1004,7 +950,7 @@ def _(n6, output_dir, pd, summarize_snapshot_weightings):
                 "line": "VIC-SA Interconnector",
                 "average_abs_flow_mw": n6.lines_t.p0["VIC-SA Interconnector"].abs().mean(),
                 "peak_abs_flow_mw": n6.lines_t.p0["VIC-SA Interconnector"].abs().max(),
-                "hours_binding_estimate": (weights * n6.lines_t.p0["VIC-SA Interconnector"].abs().ge(0.98 * float(n6.lines.at["VIC-SA Interconnector", "s_nom"]))).sum(),
+                "hours_binding_estimate": (_weights * n6.lines_t.p0["VIC-SA Interconnector"].abs().ge(0.98 * float(n6.lines.at["VIC-SA Interconnector", "s_nom"]))).sum(),
             }
         ]
     )
@@ -1068,6 +1014,865 @@ def _(
         ],
     )
     return
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        "## N7: Interconnector stress test\n\n"
+        "This scenario keeps the same VIC/SA structure as N6 but tightens the interconnector.\n"
+        "That makes congestion more frequent and gives a clean transmission-sensitivity comparison."
+    )
+    return
+
+
+@app.cell
+def _(np, pd, pypsa, ramp_defaults, thermal_units_base, weekday_h, weekend_h):
+    def _to_10min_n7(half_hourly):
+        x = np.linspace(0, 48, 144, endpoint=False)
+        return np.interp(x, np.arange(49), np.append(half_hourly, half_hourly[0]))
+
+    def build_n7_interconnector_stress(line_capacity_mw=550.0):
+        n7 = pypsa.Network()
+        n7.set_snapshots(
+            pd.date_range("2024-01-04", periods=576, freq="10min").as_unit("ns"),
+            weightings_from_timedelta=True,
+        )
+
+        for carrier in ["AC", "solar", "wind", "brown_coal", "black_coal", "ccgt", "ocgt", "scarcity", "bess"]:
+            n7.add("Carrier", carrier)
+
+        n7.add("Bus", "VIC", carrier="AC")
+        n7.add("Bus", "SA", carrier="AC")
+        n7.add("Line", "VIC-SA Interconnector", bus0="VIC", bus1="SA", r=0.01, x=0.15, s_nom=line_capacity_mw)
+
+        slot = np.arange(576) % 144
+        peak_adder = np.ones(144)
+        peak_adder[96:126] = 1.05
+        peak_adder[102:120] = 1.08
+
+        base_shape = np.concatenate(
+            [
+                _to_10min_n7(weekday_h) * 1.00 * peak_adder,
+                _to_10min_n7(weekday_h) * 0.97 * peak_adder,
+                _to_10min_n7(weekend_h) * 0.87 * peak_adder,
+                _to_10min_n7(weekend_h) * 0.83 * peak_adder,
+            ]
+        )
+
+        rng = np.random.default_rng(17)
+        vic_noise = rng.normal(0.0, 0.007, 576)
+        sa_noise = rng.normal(0.0, 0.010, 576)
+        vic_demand = (6000 * (base_shape + vic_noise)).clip(min=0)
+        sa_shape = np.roll(base_shape, 6) * 0.96
+        sa_shape += 0.03 * np.sin(2 * np.pi * np.arange(576) / 144)
+        sa_demand = (1900 * (sa_shape + sa_noise)).clip(min=0)
+
+        n7.add("Load", "VIC Demand", bus="VIC", p_set=pd.Series(vic_demand, index=n7.snapshots))
+        n7.add("Load", "SA Demand", bus="SA", p_set=pd.Series(sa_demand, index=n7.snapshots))
+
+        vic_solar_pu = np.exp(-0.5 * ((slot - 72) / 15.5) ** 2)
+        sa_solar_pu = np.exp(-0.5 * ((slot - 74) / 14.0) ** 2)
+        sa_wind_pu = np.clip(
+            0.42 + 0.18 * np.sin(2 * np.pi * np.arange(576) / 144 + 0.8) + rng.normal(0.0, 0.06, 576),
+            0.05,
+            0.90,
+        )
+
+        n7.add("Generator", "VIC Solar", bus="VIC", carrier="solar", p_nom=3200, marginal_cost=0.0)
+        n7.add("Generator", "SA Solar", bus="SA", carrier="solar", p_nom=2200, marginal_cost=0.0)
+        n7.add("Generator", "SA Wind", bus="SA", carrier="wind", p_nom=1800, marginal_cost=0.0)
+        n7.generators_t.p_max_pu = pd.DataFrame(
+            {
+                "VIC Solar": vic_solar_pu,
+                "SA Solar": sa_solar_pu,
+                "SA Wind": sa_wind_pu,
+            },
+            index=n7.snapshots,
+        )
+
+        vic_units = ["Brown Coal A", "Brown Coal B", "Brown Coal C", "Black Coal A", "Black Coal B", "CCGT A"]
+        sa_units = ["CCGT B", "OCGT A"]
+
+        for row in thermal_units_base.itertuples(index=False):
+            if row.unit_name in vic_units:
+                bus = "VIC"
+                unit_name = row.unit_name
+            elif row.unit_name in sa_units:
+                bus = "SA"
+                unit_name = f"SA {row.unit_name}"
+            else:
+                continue
+
+            ramp = ramp_defaults[row.tech]
+            n7.add(
+                "Generator",
+                unit_name,
+                bus=bus,
+                carrier=row.tech,
+                p_nom=row.p_nom_mw,
+                marginal_cost=row.marginal_cost,
+                ramp_limit_up=ramp["ramp_limit_up"],
+                ramp_limit_down=ramp["ramp_limit_down"],
+            )
+
+        n7.add("Generator", "VIC Scarcity", bus="VIC", carrier="scarcity", p_nom=15000, marginal_cost=15500.0)
+        n7.add("Generator", "SA Scarcity", bus="SA", carrier="scarcity", p_nom=8000, marginal_cost=15500.0)
+        n7.add(
+            "StorageUnit",
+            "SA BESS",
+            bus="SA",
+            carrier="bess",
+            p_nom=300,
+            max_hours=2.0,
+            efficiency_store=0.92,
+            efficiency_dispatch=0.92,
+            state_of_charge_initial=0.0,
+            cyclic_state_of_charge=True,
+            marginal_cost=0.0,
+            marginal_cost_storage=0.0,
+        )
+
+        vic_dispatch_order_n7 = pd.Index(
+            ["VIC Solar", "Brown Coal A", "Brown Coal B", "Brown Coal C", "Black Coal A", "Black Coal B", "CCGT A", "VIC Scarcity"],
+            name="generator",
+        )
+        sa_dispatch_order_n7 = pd.Index(
+            ["SA Solar", "SA Wind", "SA CCGT B", "SA OCGT A", "SA Scarcity"],
+            name="generator",
+        )
+        status, condition = n7.optimize(solver_name="highs")
+        return n7, line_capacity_mw, sa_dispatch_order_n7, status, condition, vic_dispatch_order_n7
+
+    n7, line_capacity_n7, sa_dispatch_order_n7, status_n7, condition_n7, vic_dispatch_order_n7 = build_n7_interconnector_stress()
+    return condition_n7, line_capacity_n7, n7, sa_dispatch_order_n7, status_n7, vic_dispatch_order_n7
+
+
+@app.cell
+def _(build_two_region_figure, export_figure, n7, sa_dispatch_order_n7, vic_dispatch_order_n7):
+    n7_fig = build_two_region_figure(
+        n7,
+        vic_dispatch_order=vic_dispatch_order_n7,
+        sa_dispatch_order=sa_dispatch_order_n7,
+        line_name="VIC-SA Interconnector",
+        storage_name="SA BESS",
+    )
+    export_figure(n7_fig, stem="tm2_n7_interconnector_stress")
+    n7_fig
+    return
+
+
+@app.cell
+def _(build_multiregion_summary_tables, line_capacity_n7, n7, output_dir, pd, summarize_snapshot_weightings):
+    results_n7 = pd.concat(
+        [
+            n7.loads_t.p[["VIC Demand", "SA Demand"]].rename(columns={"VIC Demand": "vic_demand_mw", "SA Demand": "sa_demand_mw"}),
+            n7.buses_t.marginal_price[["VIC", "SA"]].rename(columns={"VIC": "vic_price_per_mwh", "SA": "sa_price_per_mwh"}),
+            n7.lines_t.p0[["VIC-SA Interconnector"]].rename(columns={"VIC-SA Interconnector": "vic_to_sa_flow_mw"}),
+            n7.storage_units_t.p_store[["SA BESS"]].rename(columns={"SA BESS": "sa_bess_charge_mw"}),
+            n7.storage_units_t.p_dispatch[["SA BESS"]].rename(columns={"SA BESS": "sa_bess_discharge_mw"}),
+            n7.storage_units_t.state_of_charge[["SA BESS"]].rename(columns={"SA BESS": "sa_bess_soc_mwh"}),
+            n7.generators_t.p.rename(columns=lambda name: f"{name.lower().replace(' ', '_')}_mw"),
+        ],
+        axis=1,
+    )
+    results_n7.to_csv(output_dir / "results_tm2_n7_interconnector_stress.csv")
+
+    regional_summary_n7, line_summary_n7, _storage_summary_n7 = build_multiregion_summary_tables(
+        n7,
+        region_load_map={"VIC": "VIC Demand", "SA": "SA Demand"},
+        line_name="VIC-SA Interconnector",
+        storage_name="SA BESS",
+        storage_bus="SA",
+    )
+    regional_summary_n7.to_csv(output_dir / "regional_summary_tm2_n7_interconnector_stress.csv", index=False)
+    line_summary_n7.to_csv(output_dir / "line_summary_tm2_n7_interconnector_stress.csv", index=False)
+
+    snapshot_weightings_n7 = summarize_snapshot_weightings(n7, "TM2_N7_INTERCONNECTOR_STRESS")
+    snapshot_weightings_n7.to_csv(output_dir / "snapshot_weightings_tm2_n7_interconnector_stress.csv", index=False)
+    return line_summary_n7, regional_summary_n7
+
+
+@app.cell
+def _(
+    build_scenario_kpi_summary,
+    condition_n7,
+    line_capacity_n7,
+    n7,
+    pd,
+    regional_summary_n7,
+    status_n7,
+):
+    market_totals_n7 = pd.DataFrame(
+        {
+            "metric": [
+                "Total demand (MWh)",
+                "Average shadow price ($/MWh)",
+                "Peak shadow price ($/MWh)",
+            ],
+            "value": [
+                regional_summary_n7["total_demand_mwh"].sum(),
+                n7.buses_t.marginal_price[["VIC", "SA"]].mean(axis=1).mean(),
+                n7.buses_t.marginal_price[["VIC", "SA"]].max().max(),
+            ],
+        }
+    )
+    build_scenario_kpi_summary(
+        status=status_n7,
+        condition=condition_n7,
+        demand_series=n7.loads_t.p[["VIC Demand", "SA Demand"]].sum(axis=1),
+        market_totals=market_totals_n7,
+        extra_metrics=[
+            ("Line capacity (MW)", line_capacity_n7),
+            ("Average VIC price ($/MWh)", regional_summary_n7.set_index("region").at["VIC", "average_price_aud_per_mwh"]),
+            ("Average SA price ($/MWh)", regional_summary_n7.set_index("region").at["SA", "average_price_aud_per_mwh"]),
+            ("Peak interconnector flow (MW)", float(n7.lines_t.p0["VIC-SA Interconnector"].abs().max())),
+        ],
+    )
+    return
+
+
+@app.cell
+def _(line_summary_n6, line_summary_n7, pd, regional_summary_n6, regional_summary_n7):
+    n6_vic = regional_summary_n6.set_index("region").loc["VIC"]
+    n6_sa = regional_summary_n6.set_index("region").loc["SA"]
+    n7_vic = regional_summary_n7.set_index("region").loc["VIC"]
+    n7_sa = regional_summary_n7.set_index("region").loc["SA"]
+
+    _comparison = pd.DataFrame(
+        [
+            {"metric": "VIC average price ($/MWh)", "n6": n6_vic["average_price_aud_per_mwh"], "n7": n7_vic["average_price_aud_per_mwh"]},
+            {"metric": "SA average price ($/MWh)", "n6": n6_sa["average_price_aud_per_mwh"], "n7": n7_sa["average_price_aud_per_mwh"]},
+            {"metric": "VIC peak price ($/MWh)", "n6": n6_vic["peak_price_aud_per_mwh"], "n7": n7_vic["peak_price_aud_per_mwh"]},
+            {"metric": "SA peak price ($/MWh)", "n6": n6_sa["peak_price_aud_per_mwh"], "n7": n7_sa["peak_price_aud_per_mwh"]},
+            {"metric": "Average absolute interconnector flow (MW)", "n6": line_summary_n6.iloc[0]["average_abs_flow_mw"], "n7": line_summary_n7.iloc[0]["average_abs_flow_mw"]},
+            {"metric": "Peak absolute interconnector flow (MW)", "n6": line_summary_n6.iloc[0]["peak_abs_flow_mw"], "n7": line_summary_n7.iloc[0]["peak_abs_flow_mw"]},
+            {"metric": "Estimated binding hours", "n6": line_summary_n6.iloc[0]["hours_binding_estimate"], "n7": line_summary_n7.iloc[0]["hours_binding_estimate"]},
+        ]
+    )
+    _comparison["delta_n7_minus_n6"] = _comparison["n7"] - _comparison["n6"]
+    _comparison.round(1)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        "## N8: Storage placement study\n\n"
+        "This scenario asks where the battery is more valuable under congestion. The network keeps the\n"
+        "N7 stressed interconnector, but moves the 300 MW / 2h BESS from SA to VIC."
+    )
+    return
+
+
+@app.cell
+def _(np, pd, pypsa, ramp_defaults, thermal_units_base, weekday_h, weekend_h):
+    def _to_10min_n8(half_hourly):
+        x = np.linspace(0, 48, 144, endpoint=False)
+        return np.interp(x, np.arange(49), np.append(half_hourly, half_hourly[0]))
+
+    def build_n8_storage_placement(line_capacity_mw=550.0):
+        n8 = pypsa.Network()
+        n8.set_snapshots(
+            pd.date_range("2024-01-04", periods=576, freq="10min").as_unit("ns"),
+            weightings_from_timedelta=True,
+        )
+
+        for carrier in ["AC", "solar", "wind", "brown_coal", "black_coal", "ccgt", "ocgt", "scarcity", "bess"]:
+            n8.add("Carrier", carrier)
+
+        n8.add("Bus", "VIC", carrier="AC")
+        n8.add("Bus", "SA", carrier="AC")
+        n8.add("Line", "VIC-SA Interconnector", bus0="VIC", bus1="SA", r=0.01, x=0.15, s_nom=line_capacity_mw)
+
+        slot = np.arange(576) % 144
+        peak_adder = np.ones(144)
+        peak_adder[96:126] = 1.05
+        peak_adder[102:120] = 1.08
+        base_shape = np.concatenate(
+            [
+                _to_10min_n8(weekday_h) * 1.00 * peak_adder,
+                _to_10min_n8(weekday_h) * 0.97 * peak_adder,
+                _to_10min_n8(weekend_h) * 0.87 * peak_adder,
+                _to_10min_n8(weekend_h) * 0.83 * peak_adder,
+            ]
+        )
+
+        rng = np.random.default_rng(17)
+        vic_noise = rng.normal(0.0, 0.007, 576)
+        sa_noise = rng.normal(0.0, 0.010, 576)
+        vic_demand = (6000 * (base_shape + vic_noise)).clip(min=0)
+        sa_shape = np.roll(base_shape, 6) * 0.96
+        sa_shape += 0.03 * np.sin(2 * np.pi * np.arange(576) / 144)
+        sa_demand = (1900 * (sa_shape + sa_noise)).clip(min=0)
+
+        n8.add("Load", "VIC Demand", bus="VIC", p_set=pd.Series(vic_demand, index=n8.snapshots))
+        n8.add("Load", "SA Demand", bus="SA", p_set=pd.Series(sa_demand, index=n8.snapshots))
+
+        vic_solar_pu = np.exp(-0.5 * ((slot - 72) / 15.5) ** 2)
+        sa_solar_pu = np.exp(-0.5 * ((slot - 74) / 14.0) ** 2)
+        sa_wind_pu = np.clip(
+            0.42 + 0.18 * np.sin(2 * np.pi * np.arange(576) / 144 + 0.8) + rng.normal(0.0, 0.06, 576),
+            0.05,
+            0.90,
+        )
+        n8.add("Generator", "VIC Solar", bus="VIC", carrier="solar", p_nom=3200, marginal_cost=0.0)
+        n8.add("Generator", "SA Solar", bus="SA", carrier="solar", p_nom=2200, marginal_cost=0.0)
+        n8.add("Generator", "SA Wind", bus="SA", carrier="wind", p_nom=1800, marginal_cost=0.0)
+        n8.generators_t.p_max_pu = pd.DataFrame(
+            {"VIC Solar": vic_solar_pu, "SA Solar": sa_solar_pu, "SA Wind": sa_wind_pu},
+            index=n8.snapshots,
+        )
+
+        vic_units = ["Brown Coal A", "Brown Coal B", "Brown Coal C", "Black Coal A", "Black Coal B", "CCGT A"]
+        sa_units = ["CCGT B", "OCGT A"]
+        for row in thermal_units_base.itertuples(index=False):
+            if row.unit_name in vic_units:
+                bus = "VIC"
+                unit_name = row.unit_name
+            elif row.unit_name in sa_units:
+                bus = "SA"
+                unit_name = f"SA {row.unit_name}"
+            else:
+                continue
+            ramp = ramp_defaults[row.tech]
+            n8.add(
+                "Generator", unit_name, bus=bus, carrier=row.tech, p_nom=row.p_nom_mw,
+                marginal_cost=row.marginal_cost, ramp_limit_up=ramp["ramp_limit_up"], ramp_limit_down=ramp["ramp_limit_down"],
+            )
+
+        n8.add("Generator", "VIC Scarcity", bus="VIC", carrier="scarcity", p_nom=15000, marginal_cost=15500.0)
+        n8.add("Generator", "SA Scarcity", bus="SA", carrier="scarcity", p_nom=8000, marginal_cost=15500.0)
+        n8.add(
+            "StorageUnit", "VIC BESS", bus="VIC", carrier="bess", p_nom=300, max_hours=2.0,
+            efficiency_store=0.92, efficiency_dispatch=0.92, state_of_charge_initial=0.0,
+            cyclic_state_of_charge=True, marginal_cost=0.0, marginal_cost_storage=0.0,
+        )
+
+        vic_dispatch_order_n8 = pd.Index(
+            ["VIC Solar", "Brown Coal A", "Brown Coal B", "Brown Coal C", "Black Coal A", "Black Coal B", "CCGT A", "VIC Scarcity"],
+            name="generator",
+        )
+        sa_dispatch_order_n8 = pd.Index(
+            ["SA Solar", "SA Wind", "SA CCGT B", "SA OCGT A", "SA Scarcity"],
+            name="generator",
+        )
+        status, condition = n8.optimize(solver_name="highs")
+        return n8, line_capacity_mw, sa_dispatch_order_n8, status, condition, vic_dispatch_order_n8
+
+    n8, line_capacity_n8, sa_dispatch_order_n8, status_n8, condition_n8, vic_dispatch_order_n8 = build_n8_storage_placement()
+    return condition_n8, line_capacity_n8, n8, sa_dispatch_order_n8, status_n8, vic_dispatch_order_n8
+
+
+@app.cell
+def _(build_two_region_figure, export_figure, n8, sa_dispatch_order_n8, vic_dispatch_order_n8):
+    n8_fig = build_two_region_figure(
+        n8,
+        vic_dispatch_order=vic_dispatch_order_n8,
+        sa_dispatch_order=sa_dispatch_order_n8,
+        line_name="VIC-SA Interconnector",
+        storage_name="VIC BESS",
+    )
+    export_figure(n8_fig, stem="tm2_n8_storage_placement")
+    n8_fig
+    return
+
+
+@app.cell
+def _(build_multiregion_summary_tables, n8, output_dir, pd, summarize_snapshot_weightings):
+    results_n8 = pd.concat(
+        [
+            n8.loads_t.p[["VIC Demand", "SA Demand"]].rename(columns={"VIC Demand": "vic_demand_mw", "SA Demand": "sa_demand_mw"}),
+            n8.buses_t.marginal_price[["VIC", "SA"]].rename(columns={"VIC": "vic_price_per_mwh", "SA": "sa_price_per_mwh"}),
+            n8.lines_t.p0[["VIC-SA Interconnector"]].rename(columns={"VIC-SA Interconnector": "vic_to_sa_flow_mw"}),
+            n8.storage_units_t.p_store[["VIC BESS"]].rename(columns={"VIC BESS": "vic_bess_charge_mw"}),
+            n8.storage_units_t.p_dispatch[["VIC BESS"]].rename(columns={"VIC BESS": "vic_bess_discharge_mw"}),
+            n8.storage_units_t.state_of_charge[["VIC BESS"]].rename(columns={"VIC BESS": "vic_bess_soc_mwh"}),
+        ],
+        axis=1,
+    )
+    results_n8.to_csv(output_dir / "results_tm2_n8_storage_placement.csv")
+
+    regional_summary_n8, line_summary_n8, bess_summary_n8 = build_multiregion_summary_tables(
+        n8,
+        region_load_map={"VIC": "VIC Demand", "SA": "SA Demand"},
+        line_name="VIC-SA Interconnector",
+        storage_name="VIC BESS",
+        storage_bus="VIC",
+    )
+    regional_summary_n8.to_csv(output_dir / "regional_summary_tm2_n8_storage_placement.csv", index=False)
+    line_summary_n8.to_csv(output_dir / "line_summary_tm2_n8_storage_placement.csv", index=False)
+    bess_summary_n8.to_csv(output_dir / "bess_summary_tm2_n8_storage_placement.csv", index=False)
+
+    snapshot_weightings_n8 = summarize_snapshot_weightings(n8, "TM2_N8_STORAGE_PLACEMENT")
+    snapshot_weightings_n8.to_csv(output_dir / "snapshot_weightings_tm2_n8_storage_placement.csv", index=False)
+    return bess_summary_n8, line_summary_n8, regional_summary_n8
+
+
+@app.cell
+def _(build_scenario_kpi_summary, bess_summary_n8, condition_n8, n8, pd, regional_summary_n8, status_n8):
+    market_totals_n8 = pd.DataFrame({
+        "metric": ["Total demand (MWh)", "Average shadow price ($/MWh)", "Peak shadow price ($/MWh)"],
+        "value": [regional_summary_n8["total_demand_mwh"].sum(), n8.buses_t.marginal_price[["VIC", "SA"]].mean(axis=1).mean(), n8.buses_t.marginal_price[["VIC", "SA"]].max().max()],
+    })
+    build_scenario_kpi_summary(
+        status=status_n8,
+        condition=condition_n8,
+        demand_series=n8.loads_t.p[["VIC Demand", "SA Demand"]].sum(axis=1),
+        market_totals=market_totals_n8,
+        extra_metrics=[
+            ("Average VIC price ($/MWh)", regional_summary_n8.set_index("region").at["VIC", "average_price_aud_per_mwh"]),
+            ("Average SA price ($/MWh)", regional_summary_n8.set_index("region").at["SA", "average_price_aud_per_mwh"]),
+            ("VIC BESS discharge (MWh)", bess_summary_n8.iloc[0]["total_discharge_mwh"]),
+        ],
+    )
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        "## N9: Renewable expansion stress\n\n"
+        "This scenario keeps the stressed N7 line, but expands SA renewables. The aim is to show how\n"
+        "a more renewable-heavy SA changes exports, binding, and regional prices under limited transmission."
+    )
+    return
+
+
+@app.cell
+def _(np, pd, pypsa, ramp_defaults, thermal_units_base, weekday_h, weekend_h):
+    def _to_10min_n9(half_hourly):
+        x = np.linspace(0, 48, 144, endpoint=False)
+        return np.interp(x, np.arange(49), np.append(half_hourly, half_hourly[0]))
+
+    def build_n9_renewable_expansion(line_capacity_mw=550.0):
+        n9 = pypsa.Network()
+        n9.set_snapshots(pd.date_range("2024-01-04", periods=576, freq="10min").as_unit("ns"), weightings_from_timedelta=True)
+        for carrier in ["AC", "solar", "wind", "brown_coal", "black_coal", "ccgt", "ocgt", "scarcity", "bess"]:
+            n9.add("Carrier", carrier)
+        n9.add("Bus", "VIC", carrier="AC")
+        n9.add("Bus", "SA", carrier="AC")
+        n9.add("Line", "VIC-SA Interconnector", bus0="VIC", bus1="SA", r=0.01, x=0.15, s_nom=line_capacity_mw)
+
+        slot = np.arange(576) % 144
+        peak_adder = np.ones(144)
+        peak_adder[96:126] = 1.05
+        peak_adder[102:120] = 1.08
+        base_shape = np.concatenate([
+            _to_10min_n9(weekday_h) * 1.00 * peak_adder,
+            _to_10min_n9(weekday_h) * 0.97 * peak_adder,
+            _to_10min_n9(weekend_h) * 0.87 * peak_adder,
+            _to_10min_n9(weekend_h) * 0.83 * peak_adder,
+        ])
+        rng = np.random.default_rng(17)
+        vic_noise = rng.normal(0.0, 0.007, 576)
+        sa_noise = rng.normal(0.0, 0.010, 576)
+        vic_demand = (6000 * (base_shape + vic_noise)).clip(min=0)
+        sa_shape = np.roll(base_shape, 6) * 0.96
+        sa_shape += 0.03 * np.sin(2 * np.pi * np.arange(576) / 144)
+        sa_demand = (1900 * (sa_shape + sa_noise)).clip(min=0)
+        n9.add("Load", "VIC Demand", bus="VIC", p_set=pd.Series(vic_demand, index=n9.snapshots))
+        n9.add("Load", "SA Demand", bus="SA", p_set=pd.Series(sa_demand, index=n9.snapshots))
+
+        vic_solar_pu = np.exp(-0.5 * ((slot - 72) / 15.5) ** 2)
+        sa_solar_pu = np.exp(-0.5 * ((slot - 74) / 14.0) ** 2)
+        sa_wind_pu = np.clip(0.45 + 0.22 * np.sin(2 * np.pi * np.arange(576) / 144 + 0.8) + rng.normal(0.0, 0.06, 576), 0.08, 0.95)
+        n9.add("Generator", "VIC Solar", bus="VIC", carrier="solar", p_nom=3200, marginal_cost=0.0)
+        n9.add("Generator", "SA Solar", bus="SA", carrier="solar", p_nom=3200, marginal_cost=0.0)
+        n9.add("Generator", "SA Wind", bus="SA", carrier="wind", p_nom=2600, marginal_cost=0.0)
+        n9.generators_t.p_max_pu = pd.DataFrame({"VIC Solar": vic_solar_pu, "SA Solar": sa_solar_pu, "SA Wind": sa_wind_pu}, index=n9.snapshots)
+
+        vic_units = ["Brown Coal A", "Brown Coal B", "Brown Coal C", "Black Coal A", "Black Coal B", "CCGT A"]
+        sa_units = ["CCGT B", "OCGT A"]
+        for row in thermal_units_base.itertuples(index=False):
+            if row.unit_name in vic_units:
+                bus = "VIC"
+                unit_name = row.unit_name
+            elif row.unit_name in sa_units:
+                bus = "SA"
+                unit_name = f"SA {row.unit_name}"
+            else:
+                continue
+            ramp = ramp_defaults[row.tech]
+            n9.add("Generator", unit_name, bus=bus, carrier=row.tech, p_nom=row.p_nom_mw, marginal_cost=row.marginal_cost, ramp_limit_up=ramp["ramp_limit_up"], ramp_limit_down=ramp["ramp_limit_down"])
+
+        n9.add("Generator", "VIC Scarcity", bus="VIC", carrier="scarcity", p_nom=15000, marginal_cost=15500.0)
+        n9.add("Generator", "SA Scarcity", bus="SA", carrier="scarcity", p_nom=8000, marginal_cost=15500.0)
+        n9.add("StorageUnit", "SA BESS", bus="SA", carrier="bess", p_nom=300, max_hours=2.0, efficiency_store=0.92, efficiency_dispatch=0.92, state_of_charge_initial=0.0, cyclic_state_of_charge=True, marginal_cost=0.0, marginal_cost_storage=0.0)
+
+        vic_dispatch_order_n9 = pd.Index(["VIC Solar", "Brown Coal A", "Brown Coal B", "Brown Coal C", "Black Coal A", "Black Coal B", "CCGT A", "VIC Scarcity"], name="generator")
+        sa_dispatch_order_n9 = pd.Index(["SA Solar", "SA Wind", "SA CCGT B", "SA OCGT A", "SA Scarcity"], name="generator")
+        status, condition = n9.optimize(solver_name="highs")
+        return n9, line_capacity_mw, sa_dispatch_order_n9, status, condition, vic_dispatch_order_n9
+
+    n9, line_capacity_n9, sa_dispatch_order_n9, status_n9, condition_n9, vic_dispatch_order_n9 = build_n9_renewable_expansion()
+    return condition_n9, line_capacity_n9, n9, sa_dispatch_order_n9, status_n9, vic_dispatch_order_n9
+
+
+@app.cell
+def _(build_two_region_figure, export_figure, n9, sa_dispatch_order_n9, vic_dispatch_order_n9):
+    n9_fig = build_two_region_figure(
+        n9,
+        vic_dispatch_order=vic_dispatch_order_n9,
+        sa_dispatch_order=sa_dispatch_order_n9,
+        line_name="VIC-SA Interconnector",
+        storage_name="SA BESS",
+    )
+    export_figure(n9_fig, stem="tm2_n9_renewable_expansion")
+    n9_fig
+    return
+
+
+@app.cell
+def _(line_capacity_n9, n9, output_dir, pd, summarize_snapshot_weightings):
+    _weights_n9 = n9.snapshot_weightings.objective.astype(float)
+    regional_summary_n9 = pd.DataFrame([
+        {"region": "VIC", "total_demand_mwh": (n9.loads_t.p["VIC Demand"] * _weights_n9).sum(), "average_price_aud_per_mwh": n9.buses_t.marginal_price["VIC"].mean(), "peak_price_aud_per_mwh": n9.buses_t.marginal_price["VIC"].max()},
+        {"region": "SA", "total_demand_mwh": (n9.loads_t.p["SA Demand"] * _weights_n9).sum(), "average_price_aud_per_mwh": n9.buses_t.marginal_price["SA"].mean(), "peak_price_aud_per_mwh": n9.buses_t.marginal_price["SA"].max()},
+    ])
+    regional_summary_n9["net_import_mwh"] = [-(n9.lines_t.p0["VIC-SA Interconnector"] * _weights_n9).sum(), (n9.lines_t.p0["VIC-SA Interconnector"] * _weights_n9).sum()]
+    regional_summary_n9.to_csv(output_dir / "regional_summary_tm2_n9_renewable_expansion.csv", index=False)
+
+    line_summary_n9 = pd.DataFrame([
+        {"line": "VIC-SA Interconnector", "line_capacity_mw": line_capacity_n9, "average_abs_flow_mw": n9.lines_t.p0["VIC-SA Interconnector"].abs().mean(), "peak_abs_flow_mw": n9.lines_t.p0["VIC-SA Interconnector"].abs().max(), "hours_binding_estimate": (_weights_n9 * n9.lines_t.p0["VIC-SA Interconnector"].abs().ge(0.98 * line_capacity_n9)).sum()}
+    ])
+    line_summary_n9.to_csv(output_dir / "line_summary_tm2_n9_renewable_expansion.csv", index=False)
+
+    renewable_summary_n9 = pd.DataFrame([
+        {
+            "sa_solar_mwh": (n9.generators_t.p["SA Solar"].clip(lower=0.0) * _weights_n9).sum(),
+            "sa_wind_mwh": (n9.generators_t.p["SA Wind"].clip(lower=0.0) * _weights_n9).sum(),
+            "sa_bess_discharge_mwh": (n9.storage_units_t.p_dispatch["SA BESS"] * _weights_n9).sum(),
+        }
+    ])
+    renewable_summary_n9.to_csv(output_dir / "renewable_summary_tm2_n9_renewable_expansion.csv", index=False)
+
+    results_n9 = pd.concat([
+        n9.loads_t.p[["VIC Demand", "SA Demand"]].rename(columns={"VIC Demand": "vic_demand_mw", "SA Demand": "sa_demand_mw"}),
+        n9.buses_t.marginal_price[["VIC", "SA"]].rename(columns={"VIC": "vic_price_per_mwh", "SA": "sa_price_per_mwh"}),
+        n9.lines_t.p0[["VIC-SA Interconnector"]].rename(columns={"VIC-SA Interconnector": "vic_to_sa_flow_mw"}),
+    ], axis=1)
+    results_n9.to_csv(output_dir / "results_tm2_n9_renewable_expansion.csv")
+
+    snapshot_weightings_n9 = summarize_snapshot_weightings(n9, "TM2_N9_RENEWABLE_EXPANSION")
+    snapshot_weightings_n9.to_csv(output_dir / "snapshot_weightings_tm2_n9_renewable_expansion.csv", index=False)
+    return line_summary_n9, regional_summary_n9, renewable_summary_n9
+
+
+@app.cell
+def _(build_scenario_kpi_summary, condition_n9, n9, pd, regional_summary_n9, renewable_summary_n9, status_n9):
+    market_totals_n9 = pd.DataFrame({
+        "metric": ["Total demand (MWh)", "Average shadow price ($/MWh)", "Peak shadow price ($/MWh)"],
+        "value": [regional_summary_n9["total_demand_mwh"].sum(), n9.buses_t.marginal_price[["VIC", "SA"]].mean(axis=1).mean(), n9.buses_t.marginal_price[["VIC", "SA"]].max().max()],
+    })
+    build_scenario_kpi_summary(
+        status=status_n9,
+        condition=condition_n9,
+        demand_series=n9.loads_t.p[["VIC Demand", "SA Demand"]].sum(axis=1),
+        market_totals=market_totals_n9,
+        extra_metrics=[
+            ("Average VIC price ($/MWh)", regional_summary_n9.set_index("region").at["VIC", "average_price_aud_per_mwh"]),
+            ("Average SA price ($/MWh)", regional_summary_n9.set_index("region").at["SA", "average_price_aud_per_mwh"]),
+            ("SA solar dispatched (MWh)", renewable_summary_n9.iloc[0]["sa_solar_mwh"]),
+            ("SA wind dispatched (MWh)", renewable_summary_n9.iloc[0]["sa_wind_mwh"]),
+        ],
+    )
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        "## N10: VIC thermal outage stress\n\n"
+        "This scenario keeps the N7 stressed transmission setting and removes one major VIC coal unit.\n"
+        "The aim is to show how an outage shifts regional prices, flows, and local scarcity."
+    )
+    return
+
+
+@app.cell
+def _(np, pd, pypsa, ramp_defaults, thermal_units_base, weekday_h, weekend_h):
+    def _to_10min_n10(half_hourly):
+        x = np.linspace(0, 48, 144, endpoint=False)
+        return np.interp(x, np.arange(49), np.append(half_hourly, half_hourly[0]))
+
+    def build_n10_outage(line_capacity_mw=550.0):
+        n10 = pypsa.Network()
+        n10.set_snapshots(pd.date_range("2024-01-04", periods=576, freq="10min").as_unit("ns"), weightings_from_timedelta=True)
+        for carrier in ["AC", "solar", "wind", "brown_coal", "black_coal", "ccgt", "ocgt", "scarcity", "bess"]:
+            n10.add("Carrier", carrier)
+        n10.add("Bus", "VIC", carrier="AC")
+        n10.add("Bus", "SA", carrier="AC")
+        n10.add("Line", "VIC-SA Interconnector", bus0="VIC", bus1="SA", r=0.01, x=0.15, s_nom=line_capacity_mw)
+
+        slot = np.arange(576) % 144
+        peak_adder = np.ones(144)
+        peak_adder[96:126] = 1.05
+        peak_adder[102:120] = 1.08
+        base_shape = np.concatenate([
+            _to_10min_n10(weekday_h) * 1.00 * peak_adder,
+            _to_10min_n10(weekday_h) * 0.97 * peak_adder,
+            _to_10min_n10(weekend_h) * 0.87 * peak_adder,
+            _to_10min_n10(weekend_h) * 0.83 * peak_adder,
+        ])
+        rng = np.random.default_rng(17)
+        vic_noise = rng.normal(0.0, 0.007, 576)
+        sa_noise = rng.normal(0.0, 0.010, 576)
+        vic_demand = (6000 * (base_shape + vic_noise)).clip(min=0)
+        sa_shape = np.roll(base_shape, 6) * 0.96
+        sa_shape += 0.03 * np.sin(2 * np.pi * np.arange(576) / 144)
+        sa_demand = (1900 * (sa_shape + sa_noise)).clip(min=0)
+        n10.add("Load", "VIC Demand", bus="VIC", p_set=pd.Series(vic_demand, index=n10.snapshots))
+        n10.add("Load", "SA Demand", bus="SA", p_set=pd.Series(sa_demand, index=n10.snapshots))
+
+        vic_solar_pu = np.exp(-0.5 * ((slot - 72) / 15.5) ** 2)
+        sa_solar_pu = np.exp(-0.5 * ((slot - 74) / 14.0) ** 2)
+        sa_wind_pu = np.clip(0.42 + 0.18 * np.sin(2 * np.pi * np.arange(576) / 144 + 0.8) + rng.normal(0.0, 0.06, 576), 0.05, 0.90)
+        n10.add("Generator", "VIC Solar", bus="VIC", carrier="solar", p_nom=3200, marginal_cost=0.0)
+        n10.add("Generator", "SA Solar", bus="SA", carrier="solar", p_nom=2200, marginal_cost=0.0)
+        n10.add("Generator", "SA Wind", bus="SA", carrier="wind", p_nom=1800, marginal_cost=0.0)
+        n10.generators_t.p_max_pu = pd.DataFrame({"VIC Solar": vic_solar_pu, "SA Solar": sa_solar_pu, "SA Wind": sa_wind_pu}, index=n10.snapshots)
+
+        vic_units = ["Brown Coal A", "Brown Coal B", "Brown Coal C", "Black Coal A", "Black Coal B", "CCGT A"]
+        sa_units = ["CCGT B", "OCGT A"]
+        for row in thermal_units_base.itertuples(index=False):
+            if row.unit_name in vic_units:
+                bus = "VIC"
+                unit_name = row.unit_name
+            elif row.unit_name in sa_units:
+                bus = "SA"
+                unit_name = f"SA {row.unit_name}"
+            else:
+                continue
+            ramp = ramp_defaults[row.tech]
+            p_nom = 0.0 if row.unit_name == "Brown Coal A" else row.p_nom_mw
+            n10.add("Generator", unit_name, bus=bus, carrier=row.tech, p_nom=p_nom, marginal_cost=row.marginal_cost, ramp_limit_up=ramp["ramp_limit_up"], ramp_limit_down=ramp["ramp_limit_down"])
+
+        n10.add("Generator", "VIC Scarcity", bus="VIC", carrier="scarcity", p_nom=15000, marginal_cost=15500.0)
+        n10.add("Generator", "SA Scarcity", bus="SA", carrier="scarcity", p_nom=8000, marginal_cost=15500.0)
+        n10.add("StorageUnit", "SA BESS", bus="SA", carrier="bess", p_nom=300, max_hours=2.0, efficiency_store=0.92, efficiency_dispatch=0.92, state_of_charge_initial=0.0, cyclic_state_of_charge=True, marginal_cost=0.0, marginal_cost_storage=0.0)
+
+        vic_dispatch_order_n10 = pd.Index(["VIC Solar", "Brown Coal A", "Brown Coal B", "Brown Coal C", "Black Coal A", "Black Coal B", "CCGT A", "VIC Scarcity"], name="generator")
+        sa_dispatch_order_n10 = pd.Index(["SA Solar", "SA Wind", "SA CCGT B", "SA OCGT A", "SA Scarcity"], name="generator")
+        status, condition = n10.optimize(solver_name="highs")
+        return n10, sa_dispatch_order_n10, status, condition, vic_dispatch_order_n10
+
+    n10, sa_dispatch_order_n10, status_n10, condition_n10, vic_dispatch_order_n10 = build_n10_outage()
+    return condition_n10, n10, sa_dispatch_order_n10, status_n10, vic_dispatch_order_n10
+
+
+@app.cell
+def _(build_two_region_figure, export_figure, n10, sa_dispatch_order_n10, vic_dispatch_order_n10):
+    n10_fig = build_two_region_figure(n10, vic_dispatch_order=vic_dispatch_order_n10, sa_dispatch_order=sa_dispatch_order_n10, line_name="VIC-SA Interconnector", storage_name="SA BESS")
+    export_figure(n10_fig, stem="tm2_n10_vic_outage")
+    n10_fig
+    return
+
+
+@app.cell
+def _(build_multiregion_summary_tables, n10, output_dir, pd, summarize_snapshot_weightings):
+    regional_summary_n10, line_summary_n10, _storage_summary_n10 = build_multiregion_summary_tables(
+        n10,
+        region_load_map={"VIC": "VIC Demand", "SA": "SA Demand"},
+        line_name="VIC-SA Interconnector",
+        storage_name="SA BESS",
+        storage_bus="SA",
+    )
+    regional_summary_n10.to_csv(output_dir / "regional_summary_tm2_n10_vic_outage.csv", index=False)
+    line_summary_n10.to_csv(output_dir / "line_summary_tm2_n10_vic_outage.csv", index=False)
+    snapshot_weightings_n10 = summarize_snapshot_weightings(n10, "TM2_N10_VIC_OUTAGE")
+    snapshot_weightings_n10.to_csv(output_dir / "snapshot_weightings_tm2_n10_vic_outage.csv", index=False)
+    return line_summary_n10, regional_summary_n10
+
+
+@app.cell
+def _(build_scenario_kpi_summary, condition_n10, n10, pd, regional_summary_n10, status_n10):
+    market_totals_n10 = pd.DataFrame({"metric": ["Total demand (MWh)", "Average shadow price ($/MWh)", "Peak shadow price ($/MWh)"], "value": [regional_summary_n10["total_demand_mwh"].sum(), n10.buses_t.marginal_price[["VIC", "SA"]].mean(axis=1).mean(), n10.buses_t.marginal_price[["VIC", "SA"]].max().max()]})
+    build_scenario_kpi_summary(status=status_n10, condition=condition_n10, demand_series=n10.loads_t.p[["VIC Demand", "SA Demand"]].sum(axis=1), market_totals=market_totals_n10, extra_metrics=[("Average VIC price ($/MWh)", regional_summary_n10.set_index("region").at["VIC", "average_price_aud_per_mwh"]), ("Average SA price ($/MWh)", regional_summary_n10.set_index("region").at["SA", "average_price_aud_per_mwh"]), ("Peak VIC price ($/MWh)", regional_summary_n10.set_index("region").at["VIC", "peak_price_aud_per_mwh"])])
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        "## N11: Storage duration study\n\n"
+        "This scenario keeps the N7 stressed transmission setting and the SA battery location, but extends\n"
+        "the battery from 2 hours to 4 hours. The point is to compare power-limited vs duration-rich storage."
+    )
+    return
+
+
+@app.cell
+def _(np, pd, pypsa, ramp_defaults, thermal_units_base, weekday_h, weekend_h):
+    def _to_10min_n11(half_hourly):
+        x = np.linspace(0, 48, 144, endpoint=False)
+        return np.interp(x, np.arange(49), np.append(half_hourly, half_hourly[0]))
+
+    def build_n11_duration(line_capacity_mw=550.0):
+        n11 = pypsa.Network()
+        n11.set_snapshots(pd.date_range("2024-01-04", periods=576, freq="10min").as_unit("ns"), weightings_from_timedelta=True)
+        for carrier in ["AC", "solar", "wind", "brown_coal", "black_coal", "ccgt", "ocgt", "scarcity", "bess"]:
+            n11.add("Carrier", carrier)
+        n11.add("Bus", "VIC", carrier="AC")
+        n11.add("Bus", "SA", carrier="AC")
+        n11.add("Line", "VIC-SA Interconnector", bus0="VIC", bus1="SA", r=0.01, x=0.15, s_nom=line_capacity_mw)
+
+        slot = np.arange(576) % 144
+        peak_adder = np.ones(144)
+        peak_adder[96:126] = 1.05
+        peak_adder[102:120] = 1.08
+        base_shape = np.concatenate([
+            _to_10min_n11(weekday_h) * 1.00 * peak_adder,
+            _to_10min_n11(weekday_h) * 0.97 * peak_adder,
+            _to_10min_n11(weekend_h) * 0.87 * peak_adder,
+            _to_10min_n11(weekend_h) * 0.83 * peak_adder,
+        ])
+        rng = np.random.default_rng(17)
+        vic_noise = rng.normal(0.0, 0.007, 576)
+        sa_noise = rng.normal(0.0, 0.010, 576)
+        vic_demand = (6000 * (base_shape + vic_noise)).clip(min=0)
+        sa_shape = np.roll(base_shape, 6) * 0.96
+        sa_shape += 0.03 * np.sin(2 * np.pi * np.arange(576) / 144)
+        sa_demand = (1900 * (sa_shape + sa_noise)).clip(min=0)
+        n11.add("Load", "VIC Demand", bus="VIC", p_set=pd.Series(vic_demand, index=n11.snapshots))
+        n11.add("Load", "SA Demand", bus="SA", p_set=pd.Series(sa_demand, index=n11.snapshots))
+
+        vic_solar_pu = np.exp(-0.5 * ((slot - 72) / 15.5) ** 2)
+        sa_solar_pu = np.exp(-0.5 * ((slot - 74) / 14.0) ** 2)
+        sa_wind_pu = np.clip(0.42 + 0.18 * np.sin(2 * np.pi * np.arange(576) / 144 + 0.8) + rng.normal(0.0, 0.06, 576), 0.05, 0.90)
+        n11.add("Generator", "VIC Solar", bus="VIC", carrier="solar", p_nom=3200, marginal_cost=0.0)
+        n11.add("Generator", "SA Solar", bus="SA", carrier="solar", p_nom=2200, marginal_cost=0.0)
+        n11.add("Generator", "SA Wind", bus="SA", carrier="wind", p_nom=1800, marginal_cost=0.0)
+        n11.generators_t.p_max_pu = pd.DataFrame({"VIC Solar": vic_solar_pu, "SA Solar": sa_solar_pu, "SA Wind": sa_wind_pu}, index=n11.snapshots)
+
+        vic_units = ["Brown Coal A", "Brown Coal B", "Brown Coal C", "Black Coal A", "Black Coal B", "CCGT A"]
+        sa_units = ["CCGT B", "OCGT A"]
+        for row in thermal_units_base.itertuples(index=False):
+            if row.unit_name in vic_units:
+                bus = "VIC"
+                unit_name = row.unit_name
+            elif row.unit_name in sa_units:
+                bus = "SA"
+                unit_name = f"SA {row.unit_name}"
+            else:
+                continue
+            ramp = ramp_defaults[row.tech]
+            n11.add("Generator", unit_name, bus=bus, carrier=row.tech, p_nom=row.p_nom_mw, marginal_cost=row.marginal_cost, ramp_limit_up=ramp["ramp_limit_up"], ramp_limit_down=ramp["ramp_limit_down"])
+
+        n11.add("Generator", "VIC Scarcity", bus="VIC", carrier="scarcity", p_nom=15000, marginal_cost=15500.0)
+        n11.add("Generator", "SA Scarcity", bus="SA", carrier="scarcity", p_nom=8000, marginal_cost=15500.0)
+        n11.add("StorageUnit", "SA BESS", bus="SA", carrier="bess", p_nom=300, max_hours=4.0, efficiency_store=0.92, efficiency_dispatch=0.92, state_of_charge_initial=0.0, cyclic_state_of_charge=True, marginal_cost=0.0, marginal_cost_storage=0.0)
+
+        vic_dispatch_order_n11 = pd.Index(["VIC Solar", "Brown Coal A", "Brown Coal B", "Brown Coal C", "Black Coal A", "Black Coal B", "CCGT A", "VIC Scarcity"], name="generator")
+        sa_dispatch_order_n11 = pd.Index(["SA Solar", "SA Wind", "SA CCGT B", "SA OCGT A", "SA Scarcity"], name="generator")
+        status, condition = n11.optimize(solver_name="highs")
+        return n11, sa_dispatch_order_n11, status, condition, vic_dispatch_order_n11
+
+    n11, sa_dispatch_order_n11, status_n11, condition_n11, vic_dispatch_order_n11 = build_n11_duration()
+    return condition_n11, n11, sa_dispatch_order_n11, status_n11, vic_dispatch_order_n11
+
+
+@app.cell
+def _(build_two_region_figure, export_figure, n11, sa_dispatch_order_n11, vic_dispatch_order_n11):
+    n11_fig = build_two_region_figure(n11, vic_dispatch_order=vic_dispatch_order_n11, sa_dispatch_order=sa_dispatch_order_n11, line_name="VIC-SA Interconnector", storage_name="SA BESS")
+    export_figure(n11_fig, stem="tm2_n11_duration_study")
+    n11_fig
+    return
+
+
+@app.cell
+def _(build_multiregion_summary_tables, n11, output_dir, pd, summarize_snapshot_weightings):
+    regional_summary_n11, _line_summary_n11, bess_summary_n11 = build_multiregion_summary_tables(
+        n11,
+        region_load_map={"VIC": "VIC Demand", "SA": "SA Demand"},
+        line_name="VIC-SA Interconnector",
+        storage_name="SA BESS",
+        storage_bus="SA",
+    )
+    regional_summary_n11.to_csv(output_dir / "regional_summary_tm2_n11_duration_study.csv", index=False)
+    bess_summary_n11.to_csv(output_dir / "bess_summary_tm2_n11_duration_study.csv", index=False)
+    snapshot_weightings_n11 = summarize_snapshot_weightings(n11, "TM2_N11_DURATION_STUDY")
+    snapshot_weightings_n11.to_csv(output_dir / "snapshot_weightings_tm2_n11_duration_study.csv", index=False)
+    return bess_summary_n11, regional_summary_n11
+
+
+@app.cell
+def _(build_scenario_kpi_summary, bess_summary_n11, condition_n11, n11, pd, regional_summary_n11, status_n11):
+    market_totals_n11 = pd.DataFrame({"metric": ["Total demand (MWh)", "Average shadow price ($/MWh)", "Peak shadow price ($/MWh)"], "value": [regional_summary_n11["total_demand_mwh"].sum(), n11.buses_t.marginal_price[["VIC", "SA"]].mean(axis=1).mean(), n11.buses_t.marginal_price[["VIC", "SA"]].max().max()]})
+    build_scenario_kpi_summary(status=status_n11, condition=condition_n11, demand_series=n11.loads_t.p[["VIC Demand", "SA Demand"]].sum(axis=1), market_totals=market_totals_n11, extra_metrics=[("Average VIC price ($/MWh)", regional_summary_n11.set_index("region").at["VIC", "average_price_aud_per_mwh"]), ("Average SA price ($/MWh)", regional_summary_n11.set_index("region").at["SA", "average_price_aud_per_mwh"]), ("SA BESS discharge (MWh)", bess_summary_n11.iloc[0]["total_discharge_mwh"]), ("SA BESS average sell price ($/MWh)", bess_summary_n11.iloc[0]["average_sell_price_aud_per_mwh"])])
+    return
+
+
+@app.cell
+def _(
+    bess_summary_n11,
+    bess_summary_n8,
+    build_multiscenario_comparison_dashboard,
+    export_figure,
+    line_summary_n10,
+    line_summary_n6,
+    line_summary_n7,
+    line_summary_n8,
+    line_summary_n9,
+    n10,
+    n11,
+    n6,
+    n7,
+    n8,
+    n9,
+    output_dir,
+    pd,
+    regional_summary_n10,
+    regional_summary_n11,
+    regional_summary_n6,
+    regional_summary_n7,
+    regional_summary_n8,
+    regional_summary_n9,
+    renewable_summary_n9,
+):
+    def _row(name, regional_df, *, line_df=None, network=None, storage_discharge_mwh=None):
+        regional = regional_df.set_index("region")
+        binding_hours = float("nan")
+        if line_df is not None:
+            binding_hours = float(line_df.iloc[0]["hours_binding_estimate"])
+        elif network is not None:
+            _weights = network.snapshot_weightings.objective.astype(float)
+            line = network.lines_t.p0["VIC-SA Interconnector"].abs()
+            cap = float(network.lines.at["VIC-SA Interconnector", "s_nom"])
+            binding_hours = float((_weights * line.ge(0.98 * cap)).sum())
+
+        return {
+            "scenario": name,
+            "avg_price_vic": regional.at["VIC", "average_price_aud_per_mwh"],
+            "avg_price_sa": regional.at["SA", "average_price_aud_per_mwh"],
+            "peak_price_system": max(
+                regional.at["VIC", "peak_price_aud_per_mwh"],
+                regional.at["SA", "peak_price_aud_per_mwh"],
+            ),
+            "binding_hours": binding_hours,
+            "storage_discharge_mwh": storage_discharge_mwh if storage_discharge_mwh is not None else 0.0,
+        }
+
+    scenario_comparison = pd.DataFrame(
+        [
+            _row("N6", regional_summary_n6, line_df=line_summary_n6, network=n6, storage_discharge_mwh=(n6.storage_units_t.p_dispatch["SA BESS"] * n6.snapshot_weightings.objective.astype(float)).sum()),
+            _row("N7", regional_summary_n7, line_df=line_summary_n7, network=n7, storage_discharge_mwh=(n7.storage_units_t.p_dispatch["SA BESS"] * n7.snapshot_weightings.objective.astype(float)).sum()),
+            _row("N8", regional_summary_n8, line_df=line_summary_n8, network=n8, storage_discharge_mwh=bess_summary_n8.iloc[0]["total_discharge_mwh"]),
+            _row("N9", regional_summary_n9, line_df=line_summary_n9, network=n9, storage_discharge_mwh=renewable_summary_n9.iloc[0]["sa_bess_discharge_mwh"]),
+            _row("N10", regional_summary_n10, line_df=line_summary_n10, storage_discharge_mwh=(n10.storage_units_t.p_dispatch["SA BESS"] * n10.snapshot_weightings.objective.astype(float)).sum()),
+            _row("N11", regional_summary_n11, network=n11, storage_discharge_mwh=bess_summary_n11.iloc[0]["total_discharge_mwh"]),
+        ]
+    )
+    scenario_comparison.to_csv(output_dir / "scenario_comparison_tm2_multiregion.csv", index=False)
+
+    comparison_fig = build_multiscenario_comparison_dashboard(
+        scenario_comparison,
+        title="Toy Model 2 Multi-region Scenario Comparison",
+        figsize=(18, 10),
+    )
+    export_figure(comparison_fig, stem="tm2_multiregion_comparison_dashboard")
+    comparison_fig
+    return (scenario_comparison,)
 
 
 if __name__ == "__main__":

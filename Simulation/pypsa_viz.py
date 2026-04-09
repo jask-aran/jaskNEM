@@ -588,3 +588,196 @@ def build_market_outcomes_dashboard(
     fig.suptitle(title or "Market Outcomes by Asset", y=0.98)
     fig.subplots_adjust(top=0.86, wspace=0.28)
     return fig
+
+
+def build_two_region_figure(
+    network,
+    *,
+    vic_dispatch_order,
+    sa_dispatch_order,
+    line_name: str = "VIC-SA Interconnector",
+    storage_name: str = "SA BESS",
+    vic_price_bus: str = "VIC",
+    sa_price_bus: str = "SA",
+    figsize: tuple[float, float] = (18, 15),
+    title: str | None = None,
+):
+    x = network.snapshots.to_pydatetime()
+    fig, axes = plt.subplots(5, 1, figsize=figsize, sharex=True)
+
+    vic_dispatch = network.generators_t.p[vic_dispatch_order].clip(lower=0.0)
+    axes[0].stackplot(
+        x,
+        *[vic_dispatch[col].to_numpy() for col in vic_dispatch.columns],
+        labels=vic_dispatch.columns,
+        alpha=0.95,
+    )
+    axes[0].set_title("VIC dispatch")
+    axes[0].set_ylabel("MW")
+    axes[0].grid(axis="y", alpha=0.2)
+    axes[0].legend(ncols=4, loc="upper center", bbox_to_anchor=(0.5, 1.24))
+
+    sa_dispatch = network.generators_t.p[sa_dispatch_order].clip(lower=0.0).copy()
+    sa_dispatch[f"{storage_name} discharge"] = network.storage_units_t.p_dispatch[storage_name].clip(lower=0.0)
+    axes[1].stackplot(
+        x,
+        *[sa_dispatch[col].to_numpy() for col in sa_dispatch.columns],
+        labels=sa_dispatch.columns,
+        alpha=0.95,
+    )
+    sa_charge = network.storage_units_t.p_store[storage_name].clip(lower=0.0)
+    axes[1].fill_between(x, 0.0, -sa_charge.to_numpy(), color="#4c78a8", alpha=0.28, label=f"{storage_name} charge")
+    axes[1].axhline(0.0, color="black", linewidth=0.8, alpha=0.6)
+    axes[1].set_title("SA dispatch")
+    axes[1].set_ylabel("MW")
+    axes[1].grid(axis="y", alpha=0.2)
+    axes[1].legend(ncols=4, loc="upper center", bbox_to_anchor=(0.5, 1.24))
+
+    line_flow = network.lines_t.p0[line_name]
+    axes[2].plot(x, line_flow.to_numpy(), color="#6f4e7c", linewidth=1.7)
+    axes[2].axhline(0.0, color="black", linewidth=0.8, alpha=0.6)
+    axes[2].set_title("Interconnector flow (positive = VIC → SA)")
+    axes[2].set_ylabel("MW")
+    axes[2].grid(axis="y", alpha=0.2)
+
+    axes[3].plot(x, network.buses_t.marginal_price[vic_price_bus].to_numpy(), color="#1f77b4", linewidth=1.7, label=vic_price_bus)
+    axes[3].plot(x, network.buses_t.marginal_price[sa_price_bus].to_numpy(), color="#d62728", linewidth=1.7, label=sa_price_bus)
+    axes[3].set_title("Regional shadow prices")
+    axes[3].set_ylabel("$/MWh")
+    axes[3].grid(axis="y", alpha=0.2)
+    axes[3].legend(loc="upper right")
+
+    soc = network.storage_units_t.state_of_charge[storage_name]
+    axes[4].plot(x, soc.to_numpy(), color="#2a6f97", linewidth=2.0)
+    axes[4].fill_between(x, soc.to_numpy(), 0.0, color="#2a6f97", alpha=0.10)
+    axes[4].set_title(f"{storage_name} state of charge")
+    axes[4].set_ylabel("MWh")
+    axes[4].set_xlabel("Snapshot")
+    axes[4].grid(axis="y", alpha=0.2)
+
+    fig.suptitle(title or "Two-region dispatch, flows, prices, and storage", y=0.995)
+    fig.subplots_adjust(hspace=0.32, top=0.93)
+    return fig
+
+
+def build_multiscenario_comparison_dashboard(
+    comparison_df: pd.DataFrame,
+    *,
+    scenario_col: str = "scenario",
+    figsize: tuple[float, float] = (18, 10),
+    title: str | None = None,
+):
+    df = comparison_df.copy()
+    scenario_labels = df[scenario_col].tolist()
+    x = np.arange(len(df))
+
+    fig, axes = plt.subplots(2, 2, figsize=figsize)
+    ax1, ax2, ax3, ax4 = axes.ravel()
+
+    width = 0.36
+    ax1.bar(x - width / 2, df["avg_price_vic"], width=width, color="#4e79a7", label="VIC")
+    ax1.bar(x + width / 2, df["avg_price_sa"], width=width, color="#e15759", label="SA")
+    ax1.set_title("Average regional prices")
+    ax1.set_ylabel("$/MWh")
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(scenario_labels, rotation=20)
+    ax1.grid(axis="y", alpha=0.2)
+    ax1.legend()
+
+    ax2.bar(x, df["peak_price_system"], color="#b07aa1")
+    ax2.set_title("Peak system price")
+    ax2.set_ylabel("$/MWh")
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(scenario_labels, rotation=20)
+    ax2.grid(axis="y", alpha=0.2)
+
+    ax3.bar(x, df["binding_hours"], color="#76b7b2")
+    ax3.set_title("Estimated line binding hours")
+    ax3.set_ylabel("Hours")
+    ax3.set_xticks(x)
+    ax3.set_xticklabels(scenario_labels, rotation=20)
+    ax3.grid(axis="y", alpha=0.2)
+
+    ax4.bar(x, df["storage_discharge_mwh"], color="#59a14f")
+    ax4.set_title("Storage discharge")
+    ax4.set_ylabel("MWh")
+    ax4.set_xticks(x)
+    ax4.set_xticklabels(scenario_labels, rotation=20)
+    ax4.grid(axis="y", alpha=0.2)
+
+    fig.suptitle(title or "Scenario comparison dashboard", y=0.98)
+    fig.subplots_adjust(top=0.91, hspace=0.34, wspace=0.24)
+    return fig
+
+
+def build_multiregion_summary_tables(
+    network,
+    *,
+    region_load_map: dict[str, str],
+    line_name: str,
+    storage_name: str | None = None,
+    storage_bus: str | None = None,
+):
+    weights = _snapshot_hours(network)
+
+    regional_rows = []
+    for region, load_name in region_load_map.items():
+        regional_rows.append(
+            {
+                "region": region,
+                "total_demand_mwh": (network.loads_t.p[load_name] * weights).sum(),
+                "average_price_aud_per_mwh": network.buses_t.marginal_price[region].mean(),
+                "peak_price_aud_per_mwh": network.buses_t.marginal_price[region].max(),
+                "local_generation_mwh": (
+                    network.generators_t.p[
+                        [g for g in network.generators.index if network.generators.at[g, "bus"] == region]
+                    ]
+                    .clip(lower=0.0)
+                    .multiply(weights, axis=0)
+                ).sum().sum(),
+            }
+        )
+
+    regional_summary = pd.DataFrame(regional_rows)
+
+    line_flow = network.lines_t.p0[line_name]
+    line_capacity = float(network.lines.at[line_name, "s_nom"])
+    line_summary = pd.DataFrame(
+        [
+            {
+                "line": line_name,
+                "line_capacity_mw": line_capacity,
+                "average_abs_flow_mw": line_flow.abs().mean(),
+                "peak_abs_flow_mw": line_flow.abs().max(),
+                "hours_binding_estimate": (weights * line_flow.abs().ge(0.98 * line_capacity)).sum(),
+            }
+        ]
+    )
+
+    if len(region_load_map) == 2:
+        region_names = list(region_load_map.keys())
+        regional_summary["net_import_mwh"] = [
+            -(line_flow * weights).sum(),
+            (line_flow * weights).sum(),
+        ]
+
+    storage_summary = None
+    if storage_name is not None and storage_name in network.storage_units.index:
+        bus = storage_bus or str(network.storage_units.at[storage_name, "bus"])
+        charge = network.storage_units_t.p_store[storage_name].clip(lower=0.0)
+        discharge = network.storage_units_t.p_dispatch[storage_name].clip(lower=0.0)
+        price = network.buses_t.marginal_price[bus]
+        storage_summary = pd.DataFrame(
+            [
+                {
+                    "storage_bus": bus,
+                    "total_charge_mwh": (charge * weights).sum(),
+                    "total_discharge_mwh": (discharge * weights).sum(),
+                    "average_sell_price_aud_per_mwh": (
+                        (discharge * price * weights).sum() / max((discharge * weights).sum(), 1e-9)
+                    ),
+                }
+            ]
+        )
+
+    return regional_summary, line_summary, storage_summary
